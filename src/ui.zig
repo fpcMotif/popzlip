@@ -9,19 +9,30 @@ const macos = @import("macos.zig");
 pub const PopClipState = struct {
     allocator: std.mem.Allocator,
     selected_text: []const u8 = "",
+    selected_buf: [4096]u8 = undefined,
     actions_list: []types.Action = &.{},
     status_msg: ?[]const u8 = null,
     window: ?*nanoui.Window = null,
     app: ?*nanoui.App = null,
 
     pub fn setSelection(self: *PopClipState, text: []const u8) void {
-        self.selected_text = text;
+        const len = @min(text.len, self.selected_buf.len);
+        @memcpy(self.selected_buf[0..len], text[0..len]);
+        self.selected_text = self.selected_buf[0..len];
         const sel = types.Selection{
-            .text = text,
+            .text = self.selected_text,
             .has_selection = text.len > 0,
             .can_paste = true,
         };
-        self.actions_list = actions.getActionsForSelection(self.allocator, sel) catch &.{};
+        const all: []types.Action = actions.getActionsForSelection(self.allocator, sel) catch &.{};
+        var kept: usize = 0;
+        for (all) |act| {
+            if (act.kind == .append_clipboard or act.kind == .notes) {
+                all[kept] = act;
+                kept += 1;
+            }
+        }
+        self.actions_list = all[0..kept];
     }
 
     pub fn view(s: *PopClipState, c: *ui.Context) void {

@@ -19,6 +19,7 @@ extern "c" fn popzlip_stop_event_monitor() void;
 extern "c" fn popzlip_set_window_frame(x: f64, y: f64, w: f64, h: f64) void;
 extern "c" fn popzlip_mark_window_visible(visible: bool) void;
 extern "c" fn popzlip_get_screen_size(out_w: *f64, out_h: *f64) void;
+extern "c" fn popzlip_show_window_without_focus(nswindow: *anyopaque) void;
 var g_state_ptr: ?*popclip_ui.PopClipState = null;
 
 fn onSelectionTrigger(mouse_x: f64, mouse_y: f64, text_ptr: [*:0]const u8, user_data: ?*anyopaque) callconv(.c) void {
@@ -48,7 +49,7 @@ fn onSelectionTrigger(mouse_x: f64, mouse_y: f64, text_ptr: [*:0]const u8, user_
     if (s.window) |w| {
         w.setSize(p.width, p.height);
         w.setPosition(p.x, p.y);
-        w.show();
+        popzlip_show_window_without_focus(w.nswindow);
         popzlip_set_window_frame(p.x, p.y, p.width, p.height);
         popzlip_mark_window_visible(true);
     }

@@ -46,6 +46,27 @@ void popzlip_get_screen_size(double *out_w, double *out_h) {
     }
 }
 
+void popzlip_show_window_without_focus(void *nswindow) {
+    NSWindow *win = (__bridge NSWindow *)nswindow;
+    if ([win isKindOfClass:[NSPanel class]]) {
+        [(NSPanel *)win setBecomesKeyOnlyIfNeeded:YES];
+    }
+    [win orderFrontRegardless];
+}
+
+static NSArray<NSPasteboardItem *> *snapshotPasteboard(NSPasteboard *pb) {
+    NSMutableArray<NSPasteboardItem *> *copies = [NSMutableArray array];
+    for (NSPasteboardItem *item in pb.pasteboardItems) {
+        NSPasteboardItem *copy = [[NSPasteboardItem alloc] init];
+        for (NSPasteboardType type in item.types) {
+            NSData *data = [item dataForType:type];
+            if (data) [copy setData:data forType:type];
+        }
+        [copies addObject:copy];
+    }
+    return copies;
+}
+
 static AXUIElementRef getCopyMenuItem(AXUIElementRef appRef) {
     CFTypeRef menuBarRef = NULL;
     if (AXUIElementCopyAttributeValue(appRef, kAXMenuBarAttribute, &menuBarRef) != kAXErrorSuccess || !menuBarRef) {
@@ -141,12 +162,14 @@ int popzlip_grab_selection(char *out_buf, int max_len) {
             }
 
             NSPasteboard *pb = [NSPasteboard generalPasteboard];
+            NSArray<NSPasteboardItem *> *savedItems = snapshotPasteboard(pb);
             NSInteger initialCount = [pb changeCount];
 
             AXUIElementPerformAction(copyItem, kAXPressAction);
             CFRelease(copyItem);
             CFRelease(appRef);
 
+            int result = 0;
             for (int i = 0; i < 15; i++) {
                 usleep(5000);
                 if ([pb changeCount] != initialCount) {
@@ -157,12 +180,17 @@ int popzlip_grab_selection(char *out_buf, int max_len) {
                         if (len < max_len) {
                             memcpy(out_buf, utf, len);
                             out_buf[len] = 0;
-                            return len;
+                            result = len;
                         }
                     }
+                    break;
                 }
             }
-            return 0;
+            if ([pb changeCount] != initialCount) {
+                [pb clearContents];
+                if (savedItems.count > 0) [pb writeObjects:savedItems];
+            }
+            return result;
         }
 
         CFRelease(appRef);
