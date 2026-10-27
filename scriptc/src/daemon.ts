@@ -80,7 +80,9 @@ export class Daemon {
     if (this.opts.simulateText.length > 0) {
       this.present(this.opts.simulateText, pzScreenWidth() / 2, pzScreenHeight() / 2);
       this.trace(`startup to popup: ${(pzNowMs() - startedAt).toFixed(2)} ms`);
-    } else if (pzMonitorStart((kind: number, x: number, y: number, detail: number) => this.onEvent(kind, x, y, detail))) {
+    } else if (
+      pzMonitorStart((kind: number, x: number, y: number, detail: number) => this.onEvent(kind, x, y, detail))
+    ) {
       console.log("popzlip daemon active: listening for text selections.");
     } else {
       console.error("Could not start the event tap. Grant Accessibility access to popzlip, then restart it.");
@@ -135,7 +137,8 @@ export class Daemon {
     pzPanelClear();
     const sep = theme.separator;
     for (const s of layout.separators) pzPanelAddSeparator(s.x, s.y, s.height, sep.r, sep.g, sep.b, sep.a);
-    for (const b of layout.buttons) pzPanelAddButton(b.actionIndex, b.label, b.x, b.y, b.width, b.height, theme.fontSize);
+    for (const b of layout.buttons)
+      pzPanelAddButton(b.actionIndex, b.label, b.x, b.y, b.width, b.height, theme.fontSize);
     pzPanelShow();
     this.frame = { x: placement.x, y: placement.y, width: layout.width, height: layout.height };
     this.visible = true;

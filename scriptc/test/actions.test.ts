@@ -95,7 +95,9 @@ describe("clipboard helpers", () => {
 
 describe("parseYamlExtension", () => {
   test("parses a #popclip snippet", () => {
-    const ext = parseYamlExtension("#popclip\nname: Google Search\nicon: magnifyingglass\nurl: https://www.google.com/search?q=***");
+    const ext = parseYamlExtension(
+      "#popclip\nname: Google Search\nicon: magnifyingglass\nurl: https://www.google.com/search?q=***",
+    );
     expect(ext?.name).toBe("Google Search");
     expect(ext?.icon).toBe("magnifyingglass");
     expect(ext?.url).toBe("https://www.google.com/search?q=***");

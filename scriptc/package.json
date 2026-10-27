@@ -6,7 +6,7 @@
   "scripts": {
     "build": "bash build.sh",
     "test": "bun test test",
-    "check": "tsrs -p tsconfig.json",
+    "verify": "bun fmt --check && bun lint && bun check && bun test test",
     "coverage": "scriptc coverage src/main.ts --ffi native/ffi.json",
     "bench": "bash bench/run.sh"
   },

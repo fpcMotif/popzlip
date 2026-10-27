@@ -7,9 +7,7 @@ export declare function pzIsTrusted(): boolean;
 export declare function pzSetTimerHandler(handler: (timerId: number) => void): void;
 export declare function pzSchedule(delayMs: number, timerId: number): void;
 export declare function pzSleepMs(ms: number): void;
-export declare function pzMonitorStart(
-  handler: (kind: number, x: number, y: number, detail: number) => void,
-): boolean;
+export declare function pzMonitorStart(handler: (kind: number, x: number, y: number, detail: number) => void): boolean;
 export declare function pzFrontmostPid(): number;
 export declare function pzSelfPid(): number;
 export declare function pzAxSelectedText(pid: number, out: Uint8Array): number;

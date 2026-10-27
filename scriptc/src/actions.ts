@@ -43,88 +43,102 @@ function precedence(op: string): number {
   return 0;
 }
 
+function binary(op: string, a: number, b: number): number | null {
+  if (op === "+") return a + b;
+  if (op === "-") return a - b;
+  if (op === "*") return a * b;
+  if (op === "/") return b === 0 ? null : a / b;
+  if (op === "%") return a - b * Math.floor(a / b);
+  if (op === "^") return Math.pow(a, b);
+  return null;
+}
+
 function applyOperator(values: number[], op: string): boolean {
-  if (values.length < 2) return false;
-  const b = values.pop() as number;
-  const a = values.pop() as number;
-  let result = 0;
-  if (op === "+") result = a + b;
-  else if (op === "-") result = a - b;
-  else if (op === "*") result = a * b;
-  else if (op === "/") {
-    if (b === 0) return false;
-    result = a / b;
-  } else if (op === "%") result = a - b * Math.floor(a / b);
-  else if (op === "^") result = Math.pow(a, b);
-  else return false;
+  const b = values.pop();
+  const a = values.pop();
+  if (a === undefined || b === undefined) return false;
+  const result = binary(op, a, b);
+  if (result === null) return false;
   values.push(result);
   return true;
 }
 
+interface MathState {
+  values: number[];
+  ops: string[];
+  expectOperand: boolean;
+}
+
+function startsNumber(c: string, next: string, expectOperand: boolean): boolean {
+  if (isDigit(c)) return true;
+  if (c === ".") return isDigit(next);
+  return c === "-" && expectOperand && (isDigit(next) || next === ".");
+}
+
+function numberEnd(expr: string, start: number): number {
+  let i = expr.charAt(start) === "-" ? start + 1 : start;
+  let hasDot = false;
+  for (; i < expr.length; i++) {
+    const ch = expr.charAt(i);
+    if (ch === "." && !hasDot) hasDot = true;
+    else if (!isDigit(ch)) break;
+  }
+  return i;
+}
+
+function pushNumber(expr: string, start: number, state: MathState): number {
+  const end = numberEnd(expr, start);
+  const num = Number(expr.slice(start, end));
+  if (Number.isNaN(num)) return -1;
+  state.values.push(num);
+  state.expectOperand = false;
+  return end;
+}
+
+function closeParen(state: MathState): boolean {
+  state.expectOperand = false;
+  for (let top = state.ops.pop(); top !== "("; top = state.ops.pop()) {
+    if (top === undefined || !applyOperator(state.values, top)) return false;
+  }
+  return true;
+}
+
+function pushOperator(state: MathState, op: string): boolean {
+  state.expectOperand = true;
+  let top = state.ops[state.ops.length - 1];
+  while (top !== undefined && top !== "(" && precedence(top) >= precedence(op)) {
+    state.ops.pop();
+    if (!applyOperator(state.values, top)) return false;
+    top = state.ops[state.ops.length - 1];
+  }
+  state.ops.push(op);
+  return true;
+}
+
+function step(expr: string, i: number, state: MathState): number {
+  const c = expr.charAt(i);
+  if (c === " " || c === "\t") return i + 1;
+  if (startsNumber(c, expr.charAt(i + 1), state.expectOperand)) return pushNumber(expr, i, state);
+  if (c === "(") {
+    state.ops.push(c);
+    state.expectOperand = true;
+    return i + 1;
+  }
+  if (c === ")") return closeParen(state) ? i + 1 : -1;
+  if (isOperator(c)) return pushOperator(state, c) ? i + 1 : -1;
+  return -1;
+}
+
 function evaluateExpression(expr: string): number | null {
-  const values: number[] = [];
-  const ops: string[] = [];
-  let expectOperand = true;
-  let i = 0;
-  while (i < expr.length) {
-    const c = expr[i] as string;
-    if (c === " " || c === "\t") {
-      i++;
-      continue;
-    }
-    const next = i + 1 < expr.length ? (expr[i + 1] as string) : "";
-    if (
-      isDigit(c) ||
-      (c === "." && isDigit(next)) ||
-      (c === "-" && expectOperand && (isDigit(next) || next === "."))
-    ) {
-      const start = i;
-      if (c === "-") i++;
-      let hasDot = false;
-      while (i < expr.length) {
-        const ch = expr[i] as string;
-        if (isDigit(ch)) i++;
-        else if (ch === "." && !hasDot) {
-          hasDot = true;
-          i++;
-        } else break;
-      }
-      const num = Number(expr.slice(start, i));
-      if (Number.isNaN(num)) return null;
-      values.push(num);
-      expectOperand = false;
-    } else if (c === "(") {
-      ops.push(c);
-      expectOperand = true;
-      i++;
-    } else if (c === ")") {
-      while (ops.length > 0 && ops[ops.length - 1] !== "(") {
-        if (!applyOperator(values, ops.pop() as string)) return null;
-      }
-      if (ops.length === 0) return null;
-      ops.pop();
-      expectOperand = false;
-      i++;
-    } else if (isOperator(c)) {
-      while (ops.length > 0) {
-        const top = ops[ops.length - 1] as string;
-        if (top === "(" || precedence(top) < precedence(c)) break;
-        ops.pop();
-        if (!applyOperator(values, top)) return null;
-      }
-      ops.push(c);
-      expectOperand = true;
-      i++;
-    } else {
-      return null;
-    }
+  const state: MathState = { values: [], ops: [], expectOperand: true };
+  for (let i = 0; i < expr.length;) {
+    i = step(expr, i, state);
+    if (i < 0) return null;
   }
-  while (ops.length > 0) {
-    const op = ops.pop() as string;
-    if (op === "(" || op === ")") return null;
-    if (!applyOperator(values, op)) return null;
+  for (let op = state.ops.pop(); op !== undefined; op = state.ops.pop()) {
+    if (op === "(" || !applyOperator(state.values, op)) return null;
   }
-  return values.length === 1 ? (values[0] as number) : null;
+  return state.values.length === 1 ? (state.values[0] ?? null) : null;
 }
 
 export function evaluateMath(text: string): number | null {
@@ -204,13 +218,17 @@ export function appendClipboard(current: string, addition: string): string {
 
 const HEX = "0123456789ABCDEF";
 
+function isUnreservedByte(b: number): boolean {
+  const isAlnum = (b >= 48 && b <= 57) || (b >= 65 && b <= 90) || (b >= 97 && b <= 122);
+  return isAlnum || b === 45 || b === 95 || b === 46 || b === 126;
+}
+
 export function urlEncode(text: string): string {
   const bytes = Buffer.from(text, "utf8");
   let out = "";
   for (let i = 0; i < bytes.length; i++) {
     const b = bytes[i] as number;
-    const isAlnum = (b >= 48 && b <= 57) || (b >= 65 && b <= 90) || (b >= 97 && b <= 122);
-    if (isAlnum || b === 45 || b === 95 || b === 46 || b === 126) out += String.fromCharCode(b);
+    if (isUnreservedByte(b)) out += String.fromCharCode(b);
     else if (b === 32) out += "+";
     else out += "%" + (HEX[b >> 4] as string) + (HEX[b & 15] as string);
   }
@@ -255,27 +273,25 @@ function stripQuotes(value: string): string {
   return v;
 }
 
+const YAML_HEADERS = ["#popclip", "# popclip", "#xpop", "# xpop"];
+
+function setYamlField(ext: YamlExtension, key: string, value: string): void {
+  if (key === "name") ext.name = value;
+  else if (key === "icon") ext.icon = value;
+  else if (key === "url") ext.url = value;
+  else if (key === "shell script") ext.shellScript = value;
+  else if (key === "key combo") ext.keyCombo = value;
+}
+
 export function parseYamlExtension(yaml: string): YamlExtension | null {
   const trimmed = yaml.trim();
-  const headers = ["#popclip", "# popclip", "#xpop", "# xpop"];
-  let hasHeader = false;
-  for (const h of headers) {
-    if (trimmed.startsWith(h)) hasHeader = true;
-  }
-  if (!hasHeader) return null;
+  if (!YAML_HEADERS.some((h) => trimmed.startsWith(h))) return null;
   const ext: YamlExtension = { name: "", icon: "", url: "", shellScript: "", keyCombo: "" };
   for (const raw of trimmed.split("\n")) {
     const line = raw.trim();
-    if (line.length === 0 || line.startsWith("#")) continue;
     const colon = line.indexOf(":");
-    if (colon < 0) continue;
-    const key = line.slice(0, colon).trim();
-    const value = stripQuotes(line.slice(colon + 1));
-    if (key === "name") ext.name = value;
-    else if (key === "icon") ext.icon = value;
-    else if (key === "url") ext.url = value;
-    else if (key === "shell script") ext.shellScript = value;
-    else if (key === "key combo") ext.keyCombo = value;
+    if (line.startsWith("#") || colon < 0) continue;
+    setYamlField(ext, line.slice(0, colon).trim(), stripQuotes(line.slice(colon + 1)));
   }
   return ext.name.length > 0 ? ext : null;
 }

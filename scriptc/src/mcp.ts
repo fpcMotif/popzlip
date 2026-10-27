@@ -20,7 +20,12 @@ interface ToolSpec {
 }
 
 const TOOLS: ToolSpec[] = [
-  { name: "popclip_get_selection", description: "Get the text selected in the frontmost macOS app.", properties: [], required: [] },
+  {
+    name: "popclip_get_selection",
+    description: "Get the text selected in the frontmost macOS app.",
+    properties: [],
+    required: [],
+  },
   {
     name: "popclip_list_actions",
     description: "List the PopClip actions available for a text.",
@@ -29,18 +34,29 @@ const TOOLS: ToolSpec[] = [
   },
   {
     name: "popclip_trigger_action",
-    description: "Run a PopClip action (copy, append, notes, search, open_url, upper, calculate, and others) on a text.",
+    description:
+      "Run a PopClip action (copy, append, notes, search, open_url, upper, calculate, and others) on a text.",
     properties: ["action", "text"],
     required: ["action", "text"],
   },
-  { name: "popclip_read_clipboard", description: "Read the current text on the clipboard.", properties: [], required: [] },
+  {
+    name: "popclip_read_clipboard",
+    description: "Read the current text on the clipboard.",
+    properties: [],
+    required: [],
+  },
   {
     name: "popclip_append_clipboard",
     description: "Append a text to the clipboard on a new line.",
     properties: ["text"],
     required: ["text"],
   },
-  { name: "popclip_get_stats", description: "Get live process stats: memory RSS and uptime.", properties: [], required: [] },
+  {
+    name: "popclip_get_stats",
+    description: "Get live process stats: memory RSS and uptime.",
+    properties: [],
+    required: [],
+  },
 ];
 
 function toolSchema(tool: ToolSpec): unknown {
@@ -91,49 +107,51 @@ export function callTool(host: McpHost, name: string, args: Record<string, unkno
   throw new Error(`Unknown tool: ${name}`);
 }
 
-export function handleRequest(host: McpHost, line: string): string | null {
-  let message: unknown;
+function asRecord(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
+}
+
+function parseMessage(line: string): Record<string, unknown> | null {
   try {
-    message = JSON.parse(line);
+    return asRecord(JSON.parse(line));
   } catch {
+    return null;
+  }
+}
+
+function initializeResult(): unknown {
+  return {
+    protocolVersion: "2024-11-05",
+    capabilities: { tools: {} },
+    serverInfo: { name: "popzlip-scriptc-mcp", version: "0.2.0" },
+  };
+}
+
+function toolCallReply(host: McpHost, id: unknown, params: unknown): string {
+  const p = asRecord(params);
+  const name = typeof p["name"] === "string" ? p["name"] : "";
+  try {
+    const text = callTool(host, name, asRecord(p["arguments"]));
+    return JSON.stringify({ jsonrpc: "2.0", id, result: { content: [{ type: "text", text }] } });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Tool failed";
+    return JSON.stringify({ jsonrpc: "2.0", id, error: { code: -32602, message: msg } });
+  }
+}
+
+export function handleRequest(host: McpHost, line: string): string | null {
+  const req = parseMessage(line);
+  if (req === null) {
     return JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } });
   }
-  if (typeof message !== "object" || message === null) return null;
-  const req = message as Record<string, unknown>;
   const id = req["id"];
   const method = req["method"];
   if (id === undefined || typeof method !== "string") return null;
-
-  if (method === "initialize") {
-    return JSON.stringify({
-      jsonrpc: "2.0",
-      id,
-      result: {
-        protocolVersion: "2024-11-05",
-        capabilities: { tools: {} },
-        serverInfo: { name: "popzlip-scriptc-mcp", version: "0.2.0" },
-      },
-    });
-  }
+  if (method === "initialize") return JSON.stringify({ jsonrpc: "2.0", id, result: initializeResult() });
   if (method === "tools/list") {
-    const tools: unknown[] = [];
-    for (const t of TOOLS) tools.push(toolSchema(t));
-    return JSON.stringify({ jsonrpc: "2.0", id, result: { tools } });
+    return JSON.stringify({ jsonrpc: "2.0", id, result: { tools: TOOLS.map((t) => toolSchema(t)) } });
   }
-  if (method === "tools/call") {
-    const params = req["params"];
-    const p = typeof params === "object" && params !== null ? (params as Record<string, unknown>) : {};
-    const name = typeof p["name"] === "string" ? (p["name"] as string) : "";
-    const rawArgs = p["arguments"];
-    const args = typeof rawArgs === "object" && rawArgs !== null ? (rawArgs as Record<string, unknown>) : {};
-    try {
-      const text = callTool(host, name, args);
-      return JSON.stringify({ jsonrpc: "2.0", id, result: { content: [{ type: "text", text }] } });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Tool failed";
-      return JSON.stringify({ jsonrpc: "2.0", id, error: { code: -32602, message: msg } });
-    }
-  }
+  if (method === "tools/call") return toolCallReply(host, id, req["params"]);
   return JSON.stringify({ jsonrpc: "2.0", id, error: { code: -32601, message: "Method not found" } });
 }
 

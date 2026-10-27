@@ -43,7 +43,12 @@
     },
     { "name": "pzFrontmostPid", "symbol": "pz_frontmost_pid", "params": [], "returns": "i32" },
     { "name": "pzSelfPid", "symbol": "pz_self_pid", "params": [], "returns": "i32" },
-    { "name": "pzAxSelectedText", "symbol": "pz_ax_selected_text", "params": ["i32", "mutable-bytes"], "returns": "i32" },
+    {
+      "name": "pzAxSelectedText",
+      "symbol": "pz_ax_selected_text",
+      "params": ["i32", "mutable-bytes"],
+      "returns": "i32"
+    },
     { "name": "pzPressCopyMenu", "symbol": "pz_press_copy_menu", "params": ["i32"], "returns": "i32" },
     { "name": "pzPbChangeCount", "symbol": "pz_pb_change_count", "params": [], "returns": "i32" },
     { "name": "pzPbRead", "symbol": "pz_pb_read", "params": ["mutable-bytes"], "returns": "i32" },
@@ -73,8 +78,18 @@
       ],
       "returns": "void"
     },
-    { "name": "pzPanelCreate", "symbol": "pz_panel_create", "params": ["f64", "f64", "f64", "f64", "f64"], "returns": "void" },
-    { "name": "pzPanelSetLabelColor", "symbol": "pz_panel_set_label_color", "params": ["f64", "f64", "f64", "f64"], "returns": "void" },
+    {
+      "name": "pzPanelCreate",
+      "symbol": "pz_panel_create",
+      "params": ["f64", "f64", "f64", "f64", "f64"],
+      "returns": "void"
+    },
+    {
+      "name": "pzPanelSetLabelColor",
+      "symbol": "pz_panel_set_label_color",
+      "params": ["f64", "f64", "f64", "f64"],
+      "returns": "void"
+    },
     { "name": "pzPanelClear", "symbol": "pz_panel_clear", "params": [], "returns": "void" },
     {
       "name": "pzPanelAddButton",
@@ -88,7 +103,12 @@
       "params": ["f64", "f64", "f64", "f64", "f64", "f64", "f64"],
       "returns": "void"
     },
-    { "name": "pzPanelSetFrame", "symbol": "pz_panel_set_frame", "params": ["f64", "f64", "f64", "f64"], "returns": "void" },
+    {
+      "name": "pzPanelSetFrame",
+      "symbol": "pz_panel_set_frame",
+      "params": ["f64", "f64", "f64", "f64"],
+      "returns": "void"
+    },
     { "name": "pzPanelShow", "symbol": "pz_panel_show", "params": [], "returns": "void" },
     { "name": "pzPanelHide", "symbol": "pz_panel_hide", "params": [], "returns": "void" },
     { "name": "pzPanelVisible", "symbol": "pz_panel_visible", "params": [], "returns": "bool" },

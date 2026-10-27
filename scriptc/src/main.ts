@@ -67,7 +67,9 @@ function runConfig(args: string[]): number {
   return 1;
 }
 
-function runBenchEngine(runs: number, text: string): void {
+function runBenchEngine(args: string[]): number {
+  const runs = Number(args[0] ?? "100000");
+  const text = args[1] ?? "https://github.com/vercel-labs/scriptc";
   let total = 0;
   const start = pzNowMs();
   for (let i = 0; i < runs; i++) total += getActionsForSelection(text, true).length;
@@ -80,67 +82,84 @@ function runBenchEngine(runs: number, text: string): void {
       rss_mb: pzRssBytes() / 1048576,
     }),
   );
+  return 0;
 }
 
-function main(argv: string[]): number {
-  let simulate = "";
-  let trace = false;
-  let exitAfter = 0;
-  let press = -1;
-  const rest: string[] = [];
+function runAppend(text: string): number {
+  pzPbWrite(appendClipboard(readClipboard(), text));
+  console.log(`Appended ${Buffer.byteLength(text, "utf8")} bytes to the clipboard.`);
+  return 0;
+}
+
+function runActions(text: string): number {
+  console.log(JSON.stringify(getActionsForSelection(text, true)));
+  return 0;
+}
+
+function startMcp(): number {
+  const startedAt = pzNowMs();
+  runMcpServer({
+    system: nativeSystem,
+    config: loadConfig(configPath()),
+    currentSelection: accessibilitySelection,
+    rssBytes: () => pzRssBytes(),
+    uptimeMs: () => pzNowMs() - startedAt,
+  });
+  return -1;
+}
+
+interface Flags {
+  simulate: string;
+  trace: boolean;
+  exitAfter: number;
+  press: number;
+  rest: string[];
+}
+
+function parseFlags(argv: string[]): Flags {
+  const flags: Flags = { simulate: "", trace: false, exitAfter: 0, press: -1, rest: [] };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i] as string;
-    if (arg === "--trace") trace = true;
-    else if (arg === "--exit-after") exitAfter = Number(argv[++i] ?? "0");
-    else if (arg === "--press") press = Number(argv[++i] ?? "-1");
-    else if (arg === "--simulate" || arg === "-s") simulate = argv[++i] ?? "";
-    else if (arg.startsWith("--simulate=")) simulate = arg.slice("--simulate=".length);
-    else rest.push(arg);
+    if (arg === "--trace") flags.trace = true;
+    else if (arg === "--exit-after") flags.exitAfter = Number(argv[++i] ?? "0");
+    else if (arg === "--press") flags.press = Number(argv[++i] ?? "-1");
+    else if (arg === "--simulate" || arg === "-s") flags.simulate = argv[++i] ?? "";
+    else if (arg.startsWith("--simulate=")) flags.simulate = arg.slice("--simulate=".length);
+    else flags.rest.push(arg);
   }
+  return flags;
+}
 
-  const command = rest[0] ?? "";
-  if (command === "--help" || command === "-h" || command === "help") {
+const HELP_COMMANDS = ["--help", "-h", "help"];
+const VERSION_COMMANDS = ["--version", "-v"];
+
+function runCommand(command: string, rest: string[]): number | null {
+  if (HELP_COMMANDS.includes(command)) {
     usage();
     return 0;
   }
-  if (command === "--version" || command === "-v") {
+  if (VERSION_COMMANDS.includes(command)) {
     console.log(VERSION);
     return 0;
   }
   if (command === "config") return runConfig(rest.slice(1));
-  if (command === "append") {
-    const text = rest[1] ?? "";
-    pzPbWrite(appendClipboard(readClipboard(), text));
-    console.log(`Appended ${Buffer.byteLength(text, "utf8")} bytes to the clipboard.`);
-    return 0;
-  }
-  if (command === "actions") {
-    console.log(JSON.stringify(getActionsForSelection(rest[1] ?? "", true)));
-    return 0;
-  }
-  if (command === "bench-engine") {
-    runBenchEngine(Number(rest[1] ?? "100000"), rest[2] ?? "https://github.com/vercel-labs/scriptc");
-    return 0;
-  }
-  if (command === "--mcp") {
-    const startedAt = pzNowMs();
-    runMcpServer({
-      system: nativeSystem,
-      config: loadConfig(configPath()),
-      currentSelection: accessibilitySelection,
-      rssBytes: () => pzRssBytes(),
-      uptimeMs: () => pzNowMs() - startedAt,
-    });
-    return -1;
-  }
-  if (command.length > 0 && simulate.length === 0) {
-    simulate = command;
-  }
+  if (command === "append") return runAppend(rest[1] ?? "");
+  if (command === "actions") return runActions(rest[1] ?? "");
+  if (command === "bench-engine") return runBenchEngine(rest.slice(1));
+  if (command === "--mcp") return startMcp();
+  return null;
+}
+
+function main(argv: string[]): number {
+  const flags = parseFlags(argv);
+  const command = flags.rest[0] ?? "";
+  const code = runCommand(command, flags.rest);
+  if (code !== null) return code;
   new Daemon(loadConfig(configPath()), {
-    simulateText: simulate,
-    trace,
-    exitAfterShowMs: exitAfter,
-    pressIndex: press,
+    simulateText: flags.simulate.length > 0 ? flags.simulate : command,
+    trace: flags.trace,
+    exitAfterShowMs: flags.exitAfter,
+    pressIndex: flags.press,
   }).start();
   return 0;
 }

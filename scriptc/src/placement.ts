@@ -2,7 +2,12 @@ import type { Placement, Rect, ScreenBounds } from "./types.ts";
 
 const GAP = 8;
 
-export function calculatePlacement(sel: Rect, popupWidth: number, popupHeight: number, screen: ScreenBounds): Placement {
+export function calculatePlacement(
+  sel: Rect,
+  popupWidth: number,
+  popupHeight: number,
+  screen: ScreenBounds,
+): Placement {
   let x = sel.x + (sel.width - popupWidth) / 2;
   if (x < screen.margin) x = screen.margin;
   else if (x + popupWidth > screen.width - screen.margin) x = screen.width - screen.margin - popupWidth;

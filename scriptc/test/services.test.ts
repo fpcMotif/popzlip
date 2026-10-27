@@ -91,8 +91,8 @@ describe("executeAction", () => {
 
   test("notes sends one AppleScript with quotes escaped", () => {
     const sys = new FakeSystem();
-    executeAction(act("it's \"quoted\"", "notes"), "it's \"quoted\"", cfg, sys);
-    expect(sys.scripts).toEqual([notesScript("it's \"quoted\"")]);
+    executeAction(act('it\'s "quoted"', "notes"), 'it\'s "quoted"', cfg, sys);
+    expect(sys.scripts).toEqual([notesScript('it\'s "quoted"')]);
     expect(sys.scripts[0]).toContain('{body:"it\'s \\"quoted\\""}');
   });
 
@@ -120,46 +120,55 @@ describe("executeAction", () => {
   });
 });
 
+function host(sys: FakeSystem): McpHost {
+  return {
+    system: sys,
+    config: defaultConfig(),
+    currentSelection: () => "selected text",
+    rssBytes: () => 8 * 1048576,
+    uptimeMs: () => 1500,
+  };
+}
+
+function call(h: McpHost, name: string, args: Record<string, unknown>): Record<string, unknown> {
+  const line = JSON.stringify({ jsonrpc: "2.0", id: 7, method: "tools/call", params: { name, arguments: args } });
+  return JSON.parse(handleRequest(h, line) ?? "null") as Record<string, unknown>;
+}
+
+function replyText(reply: Record<string, unknown>): string {
+  const result = reply["result"] as { content: { text: string }[] };
+  return result.content[0]?.text ?? "";
+}
+
+function parseReply(h: McpHost, line: string): unknown {
+  return JSON.parse(handleRequest(h, line) ?? "{}");
+}
+
 describe("MCP", () => {
-  function host(sys: FakeSystem): McpHost {
-    return {
-      system: sys,
-      config: defaultConfig(),
-      currentSelection: () => "selected text",
-      rssBytes: () => 8 * 1048576,
-      uptimeMs: () => 1500,
-    };
-  }
-
-  function call(h: McpHost, name: string, args: Record<string, unknown>): Record<string, unknown> {
-    const line = JSON.stringify({ jsonrpc: "2.0", id: 7, method: "tools/call", params: { name, arguments: args } });
-    return JSON.parse(handleRequest(h, line) ?? "null") as Record<string, unknown>;
-  }
-
-  function text(reply: Record<string, unknown>): string {
-    const result = reply["result"] as { content: { text: string }[] };
-    return result.content[0]?.text ?? "";
-  }
-
   test("initialize and tools/list", () => {
     const h = host(new FakeSystem());
-    const init = JSON.parse(handleRequest(h, '{"jsonrpc":"2.0","id":1,"method":"initialize"}') ?? "{}");
+    const init = parseReply(h, '{"jsonrpc":"2.0","id":1,"method":"initialize"}') as {
+      result: { serverInfo: { name: string } };
+    };
     expect(init.result.serverInfo.name).toBe("popzlip-scriptc-mcp");
-    const list = JSON.parse(handleRequest(h, '{"jsonrpc":"2.0","id":"a","method":"tools/list"}') ?? "{}");
+    const list = parseReply(h, '{"jsonrpc":"2.0","id":"a","method":"tools/list"}') as {
+      id: string;
+      result: { tools: { name: string }[] };
+    };
     expect(list.id).toBe("a");
-    expect(list.result.tools.map((t: { name: string }) => t.name)).toContain("popclip_append_clipboard");
+    expect(list.result.tools.map((t) => t.name)).toContain("popclip_append_clipboard");
   });
 
   test("notifications get no reply and bad JSON gets a parse error", () => {
     const h = host(new FakeSystem());
     expect(handleRequest(h, '{"jsonrpc":"2.0","method":"notifications/initialized"}')).toBeNull();
-    expect(JSON.parse(handleRequest(h, "{oops") ?? "{}").error.code).toBe(-32700);
+    expect((parseReply(h, "{oops") as { error: { code: number } }).error.code).toBe(-32700);
   });
 
   test("clipboard text with quotes stays valid JSON", () => {
     const sys = new FakeSystem();
     sys.clipboard = 'say "hi"\n\tbye';
-    expect(text(call(host(sys), "popclip_read_clipboard", {}))).toBe('say "hi"\n\tbye');
+    expect(replyText(call(host(sys), "popclip_read_clipboard", {}))).toBe('say "hi"\n\tbye');
   });
 
   test("append keeps the existing clipboard", () => {
@@ -171,15 +180,17 @@ describe("MCP", () => {
 
   test("trigger_action runs any action by id or kind", () => {
     const sys = new FakeSystem();
-    expect(text(call(host(sys), "popclip_trigger_action", { action: "calculate", text: "2 ^ 10" }))).toBe("= 1024");
+    expect(replyText(call(host(sys), "popclip_trigger_action", { action: "calculate", text: "2 ^ 10" }))).toBe(
+      "= 1024",
+    );
     call(host(sys), "popclip_trigger_action", { action: "title_case", text: "a b" });
     expect(sys.clipboard).toBe("A B");
   });
 
   test("selection, stats and unknown tools", () => {
     const h = host(new FakeSystem());
-    expect(text(call(h, "popclip_get_selection", {}))).toBe("selected text");
-    expect(text(call(h, "popclip_get_stats", {}))).toContain("8.00 MB");
+    expect(replyText(call(h, "popclip_get_selection", {}))).toBe("selected text");
+    expect(replyText(call(h, "popclip_get_stats", {}))).toContain("8.00 MB");
     expect((call(h, "nope", {})["error"] as { code: number }).code).toBe(-32602);
   });
 });
