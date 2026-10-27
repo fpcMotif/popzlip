@@ -1,0 +1,17 @@
+{
+  "name": "popzlip-scriptc",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "bash build.sh",
+    "test": "bun test test",
+    "check": "tsrs -p tsconfig.json",
+    "coverage": "scriptc coverage src/main.ts --ffi native/ffi.json",
+    "bench": "bash bench/run.sh"
+  },
+  "devDependencies": {
+    "@types/bun": "1.3.1",
+    "@types/node": "24.10.1"
+  }
+}

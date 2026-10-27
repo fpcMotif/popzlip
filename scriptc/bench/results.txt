@@ -1,0 +1,27 @@
+popzlip benchmark: Zig (ReleaseFast) vs scriptc
+date: 2026-10-27 17:31  host: Apple M4 Pro  macOS 27.2
+runs per hyperfine case: 50
+
+metric                                            zig            scriptc
+build, warm toolchain cache (s)                16.462              1.138
+binary size (KB)                                  905                772
+CLI startup mean (ms)                    5.01 ± 0.87       5.28 ± 1.94
+CLI startup min (ms)                             3.94               3.57
+CLI startup instructions (M)                    37.32              30.12
+MCP 3-request session mean (ms)          4.75 ± 1.27       4.34 ± 0.41
+MCP session instructions (M)                    37.37              30.55
+CLI peak RSS (MB)                                   7                  7
+MCP peak RSS (MB)                                   8                  7
+popup shown, resident (MB)                         74                 67
+
+scriptc startup-to-popup (ms, 5 runs): 103.46 75.10 66.98 66.55 66.28
+scriptc action engine: {"runs":200000,"actions":14,"ns_per_op":489.3499755859375,"rss_mb":7.0625}
+
+feature                                           zig            scriptc
+append CLI writes the clipboard      no (prints only)                yes
+config set persists                                no                yes
+MCP get_selection                                stub       AX selection
+MCP replies JSON-escaped                           no                yes
+search uses configured engine                      no                yes
+popup trace and test hooks                         no    --trace --press
+unit tests                                   zig test      bun test (43)
