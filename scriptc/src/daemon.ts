@@ -125,6 +125,7 @@ export class Daemon {
     else if (kind === SCROLL && this.visible) this.dismiss();
     else if (kind === KEY_DOWN && detail === KEY_ESCAPE && this.visible) this.dismiss();
     if (this.gesture.handle(kind, x, y, detail) === "select") {
+      this.trace(`select gesture at ${x.toFixed(0)},${y.toFixed(0)}`);
       this.pendingX = x;
       this.pendingY = y;
       this.mouseUpAt = pzNowMs();
@@ -139,7 +140,10 @@ export class Daemon {
     const grabStart = pzNowMs();
     const text = grabSelection();
     const grabMs = pzNowMs() - grabStart;
-    if (text.length === 0) return;
+    if (text.length === 0) {
+      this.trace(`grab ${grabMs.toFixed(2)} ms: no selected text`);
+      return;
+    }
     this.present(text, this.pendingX, this.pendingY);
     this.trace(
       `grab ${grabMs.toFixed(2)} ms, mouse-up to popup ${(pzNowMs() - this.mouseUpAt).toFixed(2)} ms, rss ${(pzRssBytes() / 1048576).toFixed(1)} MB`,

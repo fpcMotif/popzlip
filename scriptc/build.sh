@@ -13,5 +13,5 @@ rm -rf "$app"
 mkdir -p "$app/Contents/MacOS"
 cp bundle/Info.plist "$app/Contents/Info.plist"
 cp build/popzlip "$app/Contents/MacOS/popzlip"
-codesign --force --sign - "$app" >/dev/null 2>&1
+codesign --force --sign - --requirements '=designated => identifier "com.fpc.popzlip.scriptc"' "$app" >/dev/null 2>&1
 echo "built build/popzlip and $app"

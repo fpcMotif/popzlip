@@ -832,6 +832,7 @@ static NSWindow *g_settings_window = nil;
 static NSTextField *g_settings_perm_label = nil;
 static NSImageView *g_settings_perm_icon = nil;
 static NSButton *g_settings_grant_btn = nil;
+static NSTextField *g_settings_active_label = nil;
 static PZDraggableCardView *g_settings_drag_card = nil;
 static NSStatusItem *g_status_item = nil;
 
@@ -846,7 +847,11 @@ void pz_settings_refresh_permission(void) {
             g_settings_perm_icon.contentTintColor = [NSColor systemGreenColor];
         }
         g_settings_grant_btn.title = @"Open System Settings…";
+        g_settings_active_label.stringValue = @"● Daemon Active in Background";
+        g_settings_active_label.textColor = [NSColor systemGreenColor];
     } else {
+        g_settings_active_label.stringValue = @"● Waiting for Accessibility";
+        g_settings_active_label.textColor = [NSColor systemOrangeColor];
         g_settings_perm_label.stringValue = @"Accessibility Access Required";
         g_settings_perm_label.textColor = [NSColor systemOrangeColor];
         if (@available(macOS 11.0, *)) {
@@ -908,10 +913,6 @@ void pz_settings_refresh_permission(void) {
 
 - (void)quitClicked:(id)sender {
     [NSApp terminate:nil];
-}
-
-- (void)windowWillClose:(NSNotification *)notification {
-    [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
 }
 
 @end
@@ -1048,11 +1049,10 @@ static void pz_settings_init_views(void) {
     ver.textColor = [NSColor tertiaryLabelColor];
     [content addSubview:ver];
 
-    NSTextField *activeLabel = [NSTextField labelWithString:@"● Daemon Active in Background"];
-    activeLabel.frame = NSMakeRect(170, 22, 180, 18);
-    activeLabel.font = [NSFont systemFontOfSize:11.0 weight:NSFontWeightMedium];
-    activeLabel.textColor = [NSColor systemGreenColor];
-    [content addSubview:activeLabel];
+    g_settings_active_label = [NSTextField labelWithString:@""];
+    g_settings_active_label.frame = NSMakeRect(170, 22, 180, 18);
+    g_settings_active_label.font = [NSFont systemFontOfSize:11.0 weight:NSFontWeightMedium];
+    [content addSubview:g_settings_active_label];
 
     NSButton *quitBtn = [[NSButton alloc] initWithFrame:NSMakeRect(360, 16, 96, 28)];
     quitBtn.title = @"Quit";
@@ -1065,7 +1065,6 @@ static void pz_settings_init_views(void) {
 void pz_settings_show(void) {
     pz_settings_init_views();
     pz_settings_refresh_permission();
-    [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
     [NSApp activateIgnoringOtherApps:YES];
     [g_settings_window makeKeyAndOrderFront:nil];
 }
@@ -1073,7 +1072,6 @@ void pz_settings_show(void) {
 void pz_settings_hide(void) {
     if (g_settings_window) {
         [g_settings_window orderOut:nil];
-        [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
     }
 }
 
