@@ -37,8 +37,31 @@ static int32_t pz_copy_out(NSString *str, uint8_t *out, size_t cap) {
     return (int32_t)data.length;
 }
 
+void pz_settings_show(void);
+
+@interface PZAppDelegate : NSObject <NSApplicationDelegate>
+@end
+
+@implementation PZAppDelegate
+- (BOOL)applicationShouldHandleReopen:(NSApplication *)sender hasVisibleWindows:(BOOL)flag {
+    pz_settings_show();
+    return YES;
+}
+- (void)applicationDidFinishLaunching:(NSNotification *)notification {
+    if (!AXIsProcessTrusted()) {
+        pz_settings_show();
+    }
+}
+@end
+
+static PZAppDelegate *g_app_delegate = nil;
+
 void pz_app_init(void) {
     [NSApplication sharedApplication];
+    if (!g_app_delegate) {
+        g_app_delegate = [[PZAppDelegate alloc] init];
+        NSApp.delegate = g_app_delegate;
+    }
     [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
 }
 
@@ -407,4 +430,700 @@ bool pz_panel_press(int32_t action_id) {
     if (![button isKindOfClass:[NSButton class]]) return false;
     [button performClick:nil];
     return true;
+}
+typedef void (*pz_action_cb)(int32_t action_id, void *ctx);
+
+static pz_action_cb g_guidance_dismiss_cb = NULL;
+static void *g_guidance_dismiss_ctx = NULL;
+static pz_action_cb g_activation_cb = NULL;
+static void *g_activation_ctx = NULL;
+
+void pz_set_guidance_dismiss_handler(pz_action_cb cb, void *ctx) {
+    g_guidance_dismiss_cb = cb;
+    g_guidance_dismiss_ctx = ctx;
+}
+
+void pz_set_activation_handler(pz_action_cb cb, void *ctx) {
+    g_activation_cb = cb;
+    g_activation_ctx = ctx;
+    static BOOL registered = NO;
+    if (!registered) {
+        registered = YES;
+        [[NSNotificationCenter defaultCenter] addObserverForName:NSApplicationDidBecomeActiveNotification
+                                                          object:nil
+                                                           queue:[NSOperationQueue mainQueue]
+                                                      usingBlock:^(NSNotification *note) {
+            if (g_activation_cb) g_activation_cb(0, g_activation_ctx);
+        }];
+        [[[NSWorkspace sharedWorkspace] notificationCenter] addObserverForName:NSWorkspaceDidActivateApplicationNotification
+                                                                        object:nil
+                                                                         queue:[NSOperationQueue mainQueue]
+                                                                    usingBlock:^(NSNotification *note) {
+            if (g_activation_cb) g_activation_cb(0, g_activation_ctx);
+        }];
+    }
+}
+
+static NSURL *pz_get_bundle_url(void) {
+    NSBundle *bundle = [NSBundle mainBundle];
+    NSURL *bundleURL = bundle.bundleURL;
+    if ([bundleURL.pathExtension isEqualToString:@"app"]) {
+        return bundleURL;
+    }
+    NSString *execPath = [[NSProcessInfo processInfo] arguments].firstObject;
+    if (execPath) {
+        NSURL *curr = [NSURL fileURLWithPath:execPath].URLByResolvingSymlinksInPath;
+        while (curr.path.length > 1) {
+            if ([curr.pathExtension isEqualToString:@"app"]) {
+                return curr;
+            }
+            curr = curr.URLByDeletingLastPathComponent;
+        }
+    }
+    NSString *cwd = [[NSFileManager defaultManager] currentDirectoryPath];
+    NSString *buildApp = [cwd stringByAppendingPathComponent:@"build/PopzlipTS.app"];
+    if ([[NSFileManager defaultManager] fileExistsAtPath:buildApp]) {
+        return [NSURL fileURLWithPath:buildApp];
+    }
+    NSString *userApp = [NSHomeDirectory() stringByAppendingPathComponent:@"Applications/Popzlip.app"];
+    if ([[NSFileManager defaultManager] fileExistsAtPath:userApp]) {
+        return [NSURL fileURLWithPath:userApp];
+    }
+    NSString *sysApp = @"/Applications/Popzlip.app";
+    if ([[NSFileManager defaultManager] fileExistsAtPath:sysApp]) {
+        return [NSURL fileURLWithPath:sysApp];
+    }
+    return bundleURL;
+}
+
+static pz_action_cb g_guidance_timer_cb = NULL;
+static void *g_guidance_timer_ctx = NULL;
+
+void pz_set_guidance_timer_handler(pz_action_cb cb, void *ctx) {
+    g_guidance_timer_cb = cb;
+    g_guidance_timer_ctx = ctx;
+}
+
+void pz_guidance_schedule(double delay_ms, int32_t timer_id) {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay_ms * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+        if (g_guidance_timer_cb) g_guidance_timer_cb(timer_id, g_guidance_timer_ctx);
+    });
+}
+
+bool pz_locate_settings_window(uint8_t *out, size_t cap) {
+    if (cap < 32) return false;
+    CFArrayRef windowList = CGWindowListCopyWindowInfo(
+        kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements,
+        kCGNullWindowID
+    );
+    if (!windowList) return false;
+
+    NSArray *windows = (__bridge_transfer NSArray *)windowList;
+    CGFloat primaryHeight = NSScreen.screens.firstObject.frame.size.height;
+    if (primaryHeight <= 0) primaryHeight = 900.0;
+
+    NSArray<NSString *> *processNames = @[@"System Settings", @"System Preferences"];
+
+    for (NSDictionary *info in windows) {
+        NSNumber *layer = info[(id)kCGWindowLayer];
+        if (layer == nil || [layer intValue] != 0) continue;
+
+        NSNumber *alpha = info[(id)kCGWindowAlpha];
+        if (alpha != nil && [alpha doubleValue] <= 0.5) continue;
+
+        NSString *owner = info[(id)kCGWindowOwnerName];
+        if (!owner) continue;
+
+        BOOL matches = NO;
+        for (NSString *name in processNames) {
+            if ([owner rangeOfString:name options:NSCaseInsensitiveSearch].location != NSNotFound) {
+                matches = YES;
+                break;
+            }
+        }
+        if (!matches) continue;
+
+        NSDictionary *boundsDict = info[(id)kCGWindowBounds];
+        if (!boundsDict) continue;
+
+        CGRect quartzRect;
+        if (!CGRectMakeWithDictionaryRepresentation((CFDictionaryRef)boundsDict, &quartzRect)) continue;
+        if (quartzRect.size.width <= 100 || quartzRect.size.height <= 100) continue;
+
+        double cocoaY = primaryHeight - quartzRect.origin.y - quartzRect.size.height;
+        double *d = (double *)out;
+        d[0] = quartzRect.origin.x;
+        d[1] = cocoaY;
+        d[2] = quartzRect.size.width;
+        d[3] = quartzRect.size.height;
+        return true;
+    }
+    return false;
+}
+
+bool pz_open_accessibility_settings(void) {
+    NSURL *primary = [NSURL URLWithString:@"x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Accessibility"];
+    if (primary && [[NSWorkspace sharedWorkspace] openURL:primary]) {
+        return true;
+    }
+    NSURL *fallback = [NSURL URLWithString:@"x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"];
+    if (fallback && [[NSWorkspace sharedWorkspace] openURL:fallback]) {
+        return true;
+    }
+    return false;
+}
+
+@interface PZDraggableCardView : NSView <NSDraggingSource>
+@property (nonatomic, strong) NSURL *bundleURL;
+@end
+
+@implementation PZDraggableCardView {
+    NSPoint _mouseDownPoint;
+}
+
+- (NSView *)hitTest:(NSPoint)point {
+    return NSPointInRect([self convertPoint:point fromView:self.superview], self.bounds) ? self : nil;
+}
+
+- (BOOL)mouseDownCanMoveWindow {
+    return NO;
+}
+
+- (BOOL)acceptsFirstMouse:(NSEvent *)event {
+    return YES;
+}
+
+- (void)mouseDown:(NSEvent *)event {
+    _mouseDownPoint = [event locationInWindow];
+}
+
+- (void)mouseDragged:(NSEvent *)event {
+    NSPoint current = [event locationInWindow];
+    if (hypot(current.x - _mouseDownPoint.x, current.y - _mouseDownPoint.y) < 3.0) return;
+    if (!self.bundleURL) return;
+
+    NSDraggingItem *item = [[NSDraggingItem alloc] initWithPasteboardWriter:self.bundleURL];
+    NSRect dragFrame = self.bounds;
+    NSBitmapImageRep *rep = [self bitmapImageRepForCachingDisplayInRect:dragFrame];
+    if (rep) {
+        [self cacheDisplayInRect:dragFrame toBitmapImageRep:rep];
+        NSImage *snapshot = [[NSImage alloc] initWithSize:dragFrame.size];
+        [snapshot addRepresentation:rep];
+        [item setDraggingFrame:dragFrame contents:snapshot];
+    }
+    [self beginDraggingSessionWithItems:@[item] event:event source:self];
+}
+
+- (NSDragOperation)draggingSession:(NSDraggingSession *)session sourceOperationMaskForDraggingContext:(NSDraggingContext)context {
+    return NSDragOperationCopy | NSDragOperationGeneric;
+}
+
+- (void)drawRect:(NSRect)dirtyRect {
+    [super drawRect:dirtyRect];
+    NSBezierPath *path = [NSBezierPath bezierPathWithRoundedRect:self.bounds xRadius:8 yRadius:8];
+    [[NSColor colorWithWhite:1.0 alpha:0.08] setFill];
+    [path fill];
+    [[NSColor colorWithWhite:1.0 alpha:0.12] setStroke];
+    [path setLineWidth:1.0];
+    [path stroke];
+}
+@end
+
+void pz_guidance_panel_hide(void);
+
+@interface PZGuidanceTarget : NSObject
+- (void)guidanceDismiss:(id)sender;
+@end
+
+@implementation PZGuidanceTarget
+- (void)guidanceDismiss:(id)sender {
+    pz_guidance_panel_hide();
+    if (g_guidance_dismiss_cb) {
+        g_guidance_dismiss_cb(0, g_guidance_dismiss_ctx);
+    }
+}
+@end
+
+static NSPanel *g_guidance_panel = nil;
+static NSView *g_guidance_view = nil;
+static NSView *g_granted_view = nil;
+static PZGuidanceTarget *g_guidance_target = nil;
+static PZDraggableCardView *g_guidance_card = nil;
+
+void pz_guidance_panel_create(const uint8_t *bytes, size_t len) {
+    if (g_guidance_panel) return;
+
+    g_guidance_target = [[PZGuidanceTarget alloc] init];
+    g_guidance_panel = [[NSPanel alloc] initWithContentRect:NSMakeRect(0, 0, 380, 110)
+                                                  styleMask:NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel
+                                                    backing:NSBackingStoreBuffered
+                                                      defer:NO];
+    g_guidance_panel.opaque = NO;
+    g_guidance_panel.backgroundColor = NSColor.clearColor;
+    g_guidance_panel.hasShadow = YES;
+    g_guidance_panel.level = NSPopUpMenuWindowLevel;
+    g_guidance_panel.hidesOnDeactivate = NO;
+    g_guidance_panel.becomesKeyOnlyIfNeeded = YES;
+    g_guidance_panel.movableByWindowBackground = YES;
+    g_guidance_panel.collectionBehavior = NSWindowCollectionBehaviorCanJoinAllSpaces |
+                                          NSWindowCollectionBehaviorFullScreenAuxiliary;
+
+    NSVisualEffectView *effect = [[NSVisualEffectView alloc] initWithFrame:NSMakeRect(0, 0, 380, 110)];
+    effect.material = NSVisualEffectMaterialHUDWindow;
+    effect.blendingMode = NSVisualEffectBlendingModeBehindWindow;
+    effect.state = NSVisualEffectStateActive;
+    effect.wantsLayer = YES;
+    effect.layer.cornerRadius = 16.0;
+    effect.layer.masksToBounds = YES;
+    effect.layer.borderWidth = 1.0;
+    effect.layer.borderColor = [NSColor colorWithWhite:1.0 alpha:0.12].CGColor;
+    g_guidance_panel.contentView = effect;
+
+    NSString *urlStr = pz_string(bytes, len);
+    NSURL *bundleURL = nil;
+    if (urlStr.length > 0) {
+        bundleURL = [urlStr hasPrefix:@"file://"] ? [NSURL URLWithString:urlStr] : [NSURL fileURLWithPath:urlStr];
+    }
+    if (!bundleURL) {
+        bundleURL = pz_get_bundle_url();
+    }
+    NSString *appName = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleName"] ?: @"Popzlip";
+
+    // Guidance subview
+    g_guidance_view = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 380, 110)];
+
+    NSImageView *arrow = [[NSImageView alloc] initWithFrame:NSMakeRect(14, 82, 14, 14)];
+    if (@available(macOS 11.0, *)) {
+        arrow.image = [NSImage imageWithSystemSymbolName:@"arrow.up" accessibilityDescription:@"Arrow"];
+        arrow.contentTintColor = [NSColor colorWithSRGBRed:0.0 green:0.48 blue:1.0 alpha:1.0];
+    }
+    [g_guidance_view addSubview:arrow];
+
+    NSTextField *title = [NSTextField labelWithString:[NSString stringWithFormat:@"Drag %@ into the Accessibility list", appName]];
+    title.frame = NSMakeRect(32, 80, 305, 18);
+    title.font = [NSFont systemFontOfSize:12.5 weight:NSFontWeightMedium];
+    title.textColor = [NSColor labelColor];
+    [g_guidance_view addSubview:title];
+
+    NSButton *closeBtn = [[NSButton alloc] initWithFrame:NSMakeRect(348, 80, 18, 18)];
+    closeBtn.bordered = NO;
+    if (@available(macOS 11.0, *)) {
+        closeBtn.image = [NSImage imageWithSystemSymbolName:@"xmark" accessibilityDescription:@"Close"];
+        closeBtn.contentTintColor = [NSColor secondaryLabelColor];
+    } else {
+        closeBtn.title = @"✕";
+    }
+    closeBtn.target = g_guidance_target;
+    closeBtn.action = @selector(guidanceDismiss:);
+    [g_guidance_view addSubview:closeBtn];
+
+    g_guidance_card = [[PZDraggableCardView alloc] initWithFrame:NSMakeRect(14, 34, 352, 36)];
+    g_guidance_card.bundleURL = bundleURL;
+
+    NSImageView *icon = [[NSImageView alloc] initWithFrame:NSMakeRect(8, 7, 22, 22)];
+    icon.image = [[NSWorkspace sharedWorkspace] iconForFile:bundleURL.path] ?: [NSApp applicationIconImage];
+    icon.wantsLayer = YES;
+    icon.layer.cornerRadius = 5.0;
+    icon.layer.masksToBounds = YES;
+    [g_guidance_card addSubview:icon];
+
+    NSTextField *nameLabel = [NSTextField labelWithString:appName];
+    nameLabel.frame = NSMakeRect(38, 9, 200, 18);
+    nameLabel.font = [NSFont systemFontOfSize:12.0 weight:NSFontWeightMedium];
+    nameLabel.textColor = [NSColor labelColor];
+    [g_guidance_card addSubview:nameLabel];
+
+    NSImageView *handle = [[NSImageView alloc] initWithFrame:NSMakeRect(324, 9, 18, 18)];
+    if (@available(macOS 11.0, *)) {
+        handle.image = [NSImage imageWithSystemSymbolName:@"line.3.horizontal" accessibilityDescription:@"Drag handle"];
+        handle.contentTintColor = [NSColor tertiaryLabelColor];
+    }
+    [g_guidance_card addSubview:handle];
+    [g_guidance_view addSubview:g_guidance_card];
+
+    NSTextField *sub = [NSTextField labelWithString:[NSString stringWithFormat:@"Or click + in System Settings and choose %@", appName]];
+    sub.frame = NSMakeRect(14, 12, 352, 16);
+    sub.font = [NSFont systemFontOfSize:10.5 weight:NSFontWeightRegular];
+    sub.textColor = [NSColor tertiaryLabelColor];
+    [g_guidance_view addSubview:sub];
+
+    [effect addSubview:g_guidance_view];
+
+    // Granted subview
+    g_granted_view = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 380, 110)];
+    g_granted_view.hidden = YES;
+
+    NSImageView *check = [[NSImageView alloc] initWithFrame:NSMakeRect(20, 42, 26, 26)];
+    if (@available(macOS 11.0, *)) {
+        check.image = [NSImage imageWithSystemSymbolName:@"checkmark.circle.fill" accessibilityDescription:@"Granted"];
+        check.contentTintColor = [NSColor systemGreenColor];
+    }
+    [g_granted_view addSubview:check];
+
+    NSTextField *gTitle = [NSTextField labelWithString:@"Accessibility Access Granted"];
+    gTitle.frame = NSMakeRect(58, 54, 300, 20);
+    gTitle.font = [NSFont systemFontOfSize:13.5 weight:NSFontWeightSemibold];
+    gTitle.textColor = [NSColor labelColor];
+    [g_granted_view addSubview:gTitle];
+
+    NSTextField *gSub = [NSTextField labelWithString:@"You're ready to use Popzlip."];
+    gSub.frame = NSMakeRect(58, 34, 300, 16);
+    gSub.font = [NSFont systemFontOfSize:11.0 weight:NSFontWeightRegular];
+    gSub.textColor = [NSColor secondaryLabelColor];
+    [g_granted_view addSubview:gSub];
+
+    [effect addSubview:g_granted_view];
+}
+
+void pz_guidance_panel_show(double x, double y, double w, double h) {
+    if (!g_guidance_panel) return;
+    [g_guidance_panel setFrame:NSMakeRect(x, y, w, h) display:YES];
+    [g_guidance_panel orderFrontRegardless];
+}
+
+void pz_guidance_panel_set_frame(double x, double y, double w, double h, bool animate) {
+    if (!g_guidance_panel) return;
+    [g_guidance_panel setFrame:NSMakeRect(x, y, w, h) display:YES animate:(BOOL)animate];
+}
+
+void pz_settings_refresh_permission(void);
+
+void pz_guidance_panel_set_phase(int32_t phase) {
+    if (phase == 0) {
+        g_guidance_view.hidden = NO;
+        g_granted_view.hidden = YES;
+    } else {
+        g_guidance_view.hidden = YES;
+        g_granted_view.hidden = NO;
+    }
+    pz_settings_refresh_permission();
+}
+
+void pz_guidance_panel_hide(void) {
+    if (!g_guidance_panel) return;
+    [g_guidance_panel orderOut:nil];
+}
+
+bool pz_guidance_panel_visible(void) {
+    return g_guidance_panel != nil && g_guidance_panel.visible;
+}
+
+static pz_action_cb g_simulate_cb = NULL;
+static void *g_simulate_ctx = NULL;
+
+void pz_set_simulate_handler(pz_action_cb cb, void *ctx) {
+    g_simulate_cb = cb;
+    g_simulate_ctx = ctx;
+}
+
+@interface PZSettingsTarget : NSObject <NSWindowDelegate>
+- (void)statusShowSettings:(id)sender;
+- (void)statusShowPermissions:(id)sender;
+- (void)statusSimulate:(id)sender;
+- (void)statusQuit:(id)sender;
+- (void)grantClicked:(id)sender;
+- (void)testGuidanceClicked:(id)sender;
+- (void)simulateClicked:(id)sender;
+- (void)quitClicked:(id)sender;
+@end
+
+static PZSettingsTarget *g_settings_target = nil;
+static NSWindow *g_settings_window = nil;
+static NSTextField *g_settings_perm_label = nil;
+static NSImageView *g_settings_perm_icon = nil;
+static NSButton *g_settings_grant_btn = nil;
+static PZDraggableCardView *g_settings_drag_card = nil;
+static NSStatusItem *g_status_item = nil;
+
+void pz_settings_refresh_permission(void) {
+    if (!g_settings_window) return;
+    BOOL trusted = AXIsProcessTrusted();
+    if (trusted) {
+        g_settings_perm_label.stringValue = @"Accessibility Access Granted ✓";
+        g_settings_perm_label.textColor = [NSColor systemGreenColor];
+        if (@available(macOS 11.0, *)) {
+            g_settings_perm_icon.image = [NSImage imageWithSystemSymbolName:@"checkmark.circle.fill" accessibilityDescription:@"Granted"];
+            g_settings_perm_icon.contentTintColor = [NSColor systemGreenColor];
+        }
+        g_settings_grant_btn.title = @"Open System Settings…";
+    } else {
+        g_settings_perm_label.stringValue = @"Accessibility Access Required";
+        g_settings_perm_label.textColor = [NSColor systemOrangeColor];
+        if (@available(macOS 11.0, *)) {
+            g_settings_perm_icon.image = [NSImage imageWithSystemSymbolName:@"exclamationmark.triangle.fill" accessibilityDescription:@"Required"];
+            g_settings_perm_icon.contentTintColor = [NSColor systemOrangeColor];
+        }
+        g_settings_grant_btn.title = @"Grant Access…";
+    }
+}
+
+@implementation PZSettingsTarget
+
+- (void)statusShowSettings:(id)sender {
+    pz_settings_show();
+}
+
+- (void)statusShowPermissions:(id)sender {
+    pz_settings_show();
+    [self grantClicked:nil];
+}
+
+- (void)statusSimulate:(id)sender {
+    if (g_simulate_cb) g_simulate_cb(0, g_simulate_ctx);
+}
+
+- (void)statusQuit:(id)sender {
+    [NSApp terminate:nil];
+}
+
+- (void)grantClicked:(id)sender {
+    pz_open_accessibility_settings();
+    pz_guidance_panel_create(NULL, 0);
+    pz_guidance_panel_set_phase(0);
+    double rect[4] = {0};
+    if (pz_locate_settings_window((uint8_t *)rect, sizeof(rect))) {
+        pz_guidance_panel_show(rect[0] + rect[2] / 2.0 - 190.0, rect[1] - 90.0, 380, 110);
+    } else if (g_settings_window) {
+        NSRect sf = g_settings_window.frame;
+        pz_guidance_panel_show(sf.origin.x + sf.size.width / 2.0 - 190.0, sf.origin.y - 100.0, 380, 110);
+    } else {
+        pz_guidance_panel_show(530, 80, 380, 110);
+    }
+}
+
+- (void)testGuidanceClicked:(id)sender {
+    pz_guidance_panel_create(NULL, 0);
+    pz_guidance_panel_set_phase(0);
+    if (g_settings_window) {
+        NSRect sf = g_settings_window.frame;
+        pz_guidance_panel_show(sf.origin.x + sf.size.width / 2.0 - 190.0, sf.origin.y - 100.0, 380, 110);
+    } else {
+        pz_guidance_panel_show(530, 80, 380, 110);
+    }
+}
+
+- (void)simulateClicked:(id)sender {
+    if (g_simulate_cb) g_simulate_cb(0, g_simulate_ctx);
+}
+
+- (void)quitClicked:(id)sender {
+    [NSApp terminate:nil];
+}
+
+- (void)windowWillClose:(NSNotification *)notification {
+    [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
+}
+
+@end
+
+static void pz_settings_init_views(void) {
+    if (g_settings_window) return;
+    g_settings_target = [[PZSettingsTarget alloc] init];
+
+    g_settings_window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 480, 400)
+                                                    styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable
+                                                       backing:NSBackingStoreBuffered
+                                                         defer:NO];
+    g_settings_window.title = @"Popzlip Settings";
+    g_settings_window.delegate = g_settings_target;
+    g_settings_window.releasedWhenClosed = NO;
+    [g_settings_window center];
+
+    NSView *content = g_settings_window.contentView;
+
+    NSImageView *icon = [[NSImageView alloc] initWithFrame:NSMakeRect(24, 332, 48, 48)];
+    NSURL *bundleURL = pz_get_bundle_url();
+    icon.image = [[NSWorkspace sharedWorkspace] iconForFile:bundleURL.path] ?: [NSApp applicationIconImage];
+    [content addSubview:icon];
+
+    NSTextField *title = [NSTextField labelWithString:@"Popzlip TS"];
+    title.frame = NSMakeRect(82, 354, 250, 22);
+    title.font = [NSFont systemFontOfSize:17.0 weight:NSFontWeightBold];
+    [content addSubview:title];
+
+    NSTextField *subtitle = [NSTextField labelWithString:@"Lightweight PopClip alternative with instant text actions"];
+    subtitle.frame = NSMakeRect(82, 334, 350, 18);
+    subtitle.font = [NSFont systemFontOfSize:12.0 weight:NSFontWeightRegular];
+    subtitle.textColor = [NSColor secondaryLabelColor];
+    [content addSubview:subtitle];
+
+    NSBox *sep1 = [[NSBox alloc] initWithFrame:NSMakeRect(24, 320, 432, 1)];
+    sep1.boxType = NSBoxSeparator;
+    [content addSubview:sep1];
+
+    NSView *permBox = [[NSView alloc] initWithFrame:NSMakeRect(24, 175, 432, 135)];
+    permBox.wantsLayer = YES;
+    permBox.layer.cornerRadius = 10.0;
+    permBox.layer.masksToBounds = YES;
+    permBox.layer.backgroundColor = [NSColor colorWithWhite:1.0 alpha:0.04].CGColor;
+    permBox.layer.borderWidth = 1.0;
+    permBox.layer.borderColor = [NSColor colorWithWhite:1.0 alpha:0.08].CGColor;
+
+    NSTextField *permHeader = [NSTextField labelWithString:@"ACCESSIBILITY PERMISSION"];
+    permHeader.frame = NSMakeRect(14, 108, 300, 16);
+    permHeader.font = [NSFont systemFontOfSize:10.5 weight:NSFontWeightBold];
+    permHeader.textColor = [NSColor secondaryLabelColor];
+    [permBox addSubview:permHeader];
+
+    g_settings_perm_icon = [[NSImageView alloc] initWithFrame:NSMakeRect(14, 76, 20, 20)];
+    [permBox addSubview:g_settings_perm_icon];
+
+    g_settings_perm_label = [NSTextField labelWithString:@"Checking accessibility status..."];
+    g_settings_perm_label.frame = NSMakeRect(40, 76, 230, 20);
+    g_settings_perm_label.font = [NSFont systemFontOfSize:12.5 weight:NSFontWeightMedium];
+    [permBox addSubview:g_settings_perm_label];
+
+    g_settings_grant_btn = [[NSButton alloc] initWithFrame:NSMakeRect(284, 72, 134, 28)];
+    g_settings_grant_btn.title = @"Grant Access…";
+    g_settings_grant_btn.bezelStyle = NSBezelStyleRounded;
+    g_settings_grant_btn.target = g_settings_target;
+    g_settings_grant_btn.action = @selector(grantClicked:);
+    [permBox addSubview:g_settings_grant_btn];
+
+    g_settings_drag_card = [[PZDraggableCardView alloc] initWithFrame:NSMakeRect(14, 26, 404, 36)];
+    g_settings_drag_card.bundleURL = bundleURL;
+
+    NSImageView *cardIcon = [[NSImageView alloc] initWithFrame:NSMakeRect(8, 7, 22, 22)];
+    cardIcon.image = icon.image;
+    cardIcon.wantsLayer = YES;
+    cardIcon.layer.cornerRadius = 5.0;
+    cardIcon.layer.masksToBounds = YES;
+    [g_settings_drag_card addSubview:cardIcon];
+
+    NSTextField *cardLabel = [NSTextField labelWithString:@"Drag Popzlip directly into System Settings"];
+    cardLabel.frame = NSMakeRect(38, 9, 320, 18);
+    cardLabel.font = [NSFont systemFontOfSize:11.5 weight:NSFontWeightMedium];
+    cardLabel.textColor = [NSColor labelColor];
+    [g_settings_drag_card addSubview:cardLabel];
+
+    NSImageView *cardHandle = [[NSImageView alloc] initWithFrame:NSMakeRect(376, 9, 18, 18)];
+    if (@available(macOS 11.0, *)) {
+        cardHandle.image = [NSImage imageWithSystemSymbolName:@"line.3.horizontal" accessibilityDescription:@"Drag handle"];
+        cardHandle.contentTintColor = [NSColor tertiaryLabelColor];
+    }
+    [g_settings_drag_card addSubview:cardHandle];
+    [permBox addSubview:g_settings_drag_card];
+
+    NSTextField *hintLabel = [NSTextField labelWithString:@"Tip: Drop the card above into System Settings > Accessibility, or click Grant Access."];
+    hintLabel.frame = NSMakeRect(14, 6, 404, 14);
+    hintLabel.font = [NSFont systemFontOfSize:9.5 weight:NSFontWeightRegular];
+    hintLabel.textColor = [NSColor tertiaryLabelColor];
+    [permBox addSubview:hintLabel];
+
+    [content addSubview:permBox];
+
+    NSView *testBox = [[NSView alloc] initWithFrame:NSMakeRect(24, 75, 432, 85)];
+    testBox.wantsLayer = YES;
+    testBox.layer.cornerRadius = 10.0;
+    testBox.layer.masksToBounds = YES;
+    testBox.layer.backgroundColor = [NSColor colorWithWhite:1.0 alpha:0.04].CGColor;
+    testBox.layer.borderWidth = 1.0;
+    testBox.layer.borderColor = [NSColor colorWithWhite:1.0 alpha:0.08].CGColor;
+
+    NSTextField *testHeader = [NSTextField labelWithString:@"TESTING & VERIFICATION"];
+    testHeader.frame = NSMakeRect(14, 60, 300, 16);
+    testHeader.font = [NSFont systemFontOfSize:10.5 weight:NSFontWeightBold];
+    testHeader.textColor = [NSColor secondaryLabelColor];
+    [testBox addSubview:testHeader];
+
+    NSButton *simBtn = [[NSButton alloc] initWithFrame:NSMakeRect(14, 18, 190, 32)];
+    simBtn.title = @"Simulate Selection Popup";
+    simBtn.bezelStyle = NSBezelStyleRounded;
+    simBtn.target = g_settings_target;
+    simBtn.action = @selector(simulateClicked:);
+    [testBox addSubview:simBtn];
+
+    NSButton *testGuidanceBtn = [[NSButton alloc] initWithFrame:NSMakeRect(216, 18, 202, 32)];
+    testGuidanceBtn.title = @"Test Permission Drag HUD";
+    testGuidanceBtn.bezelStyle = NSBezelStyleRounded;
+    testGuidanceBtn.target = g_settings_target;
+    testGuidanceBtn.action = @selector(testGuidanceClicked:);
+    [testBox addSubview:testGuidanceBtn];
+
+    [content addSubview:testBox];
+
+    NSTextField *ver = [NSTextField labelWithString:@"Popzlip TS v0.2.0"];
+    ver.frame = NSMakeRect(24, 22, 140, 18);
+    ver.font = [NSFont systemFontOfSize:11.0 weight:NSFontWeightRegular];
+    ver.textColor = [NSColor tertiaryLabelColor];
+    [content addSubview:ver];
+
+    NSTextField *activeLabel = [NSTextField labelWithString:@"● Daemon Active in Background"];
+    activeLabel.frame = NSMakeRect(170, 22, 180, 18);
+    activeLabel.font = [NSFont systemFontOfSize:11.0 weight:NSFontWeightMedium];
+    activeLabel.textColor = [NSColor systemGreenColor];
+    [content addSubview:activeLabel];
+
+    NSButton *quitBtn = [[NSButton alloc] initWithFrame:NSMakeRect(360, 16, 96, 28)];
+    quitBtn.title = @"Quit";
+    quitBtn.bezelStyle = NSBezelStyleRounded;
+    quitBtn.target = g_settings_target;
+    quitBtn.action = @selector(quitClicked:);
+    [content addSubview:quitBtn];
+}
+
+void pz_settings_show(void) {
+    pz_settings_init_views();
+    pz_settings_refresh_permission();
+    [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
+    [NSApp activateIgnoringOtherApps:YES];
+    [g_settings_window makeKeyAndOrderFront:nil];
+}
+
+void pz_settings_hide(void) {
+    if (g_settings_window) {
+        [g_settings_window orderOut:nil];
+        [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
+    }
+}
+
+bool pz_settings_visible(void) {
+    return g_settings_window != nil && g_settings_window.visible;
+}
+
+void pz_status_item_create(void) {
+    if (g_status_item) return;
+    if (!g_settings_target) g_settings_target = [[PZSettingsTarget alloc] init];
+
+    g_status_item = [[NSStatusBar systemStatusBar] statusItemWithLength:NSVariableStatusItemLength];
+    NSStatusBarButton *button = g_status_item.button;
+    if (button) {
+        if (@available(macOS 11.0, *)) {
+            button.image = [NSImage imageWithSystemSymbolName:@"selection.pin.in.out" accessibilityDescription:@"Popzlip"];
+            if (!button.image) {
+                button.image = [NSImage imageWithSystemSymbolName:@"text.badge.checkmark" accessibilityDescription:@"Popzlip"];
+            }
+        }
+        if (!button.image) {
+            button.title = @"Popzlip";
+        }
+    }
+
+    NSMenu *menu = [[NSMenu alloc] initWithTitle:@"Popzlip"];
+
+    NSMenuItem *header = [[NSMenuItem alloc] initWithTitle:@"Popzlip TS (Active)" action:nil keyEquivalent:@""];
+    header.enabled = NO;
+    [menu addItem:header];
+
+    [menu addItem:[NSMenuItem separatorItem]];
+
+    NSMenuItem *settingsItem = [[NSMenuItem alloc] initWithTitle:@"Settings…" action:@selector(statusShowSettings:) keyEquivalent:@","];
+    settingsItem.target = g_settings_target;
+    [menu addItem:settingsItem];
+
+    NSMenuItem *permItem = [[NSMenuItem alloc] initWithTitle:@"Accessibility Permission…" action:@selector(statusShowPermissions:) keyEquivalent:@""];
+    permItem.target = g_settings_target;
+    [menu addItem:permItem];
+
+    NSMenuItem *simItem = [[NSMenuItem alloc] initWithTitle:@"Simulate Selection Popup" action:@selector(statusSimulate:) keyEquivalent:@"s"];
+    simItem.target = g_settings_target;
+    [menu addItem:simItem];
+
+    [menu addItem:[NSMenuItem separatorItem]];
+
+    NSMenuItem *quitItem = [[NSMenuItem alloc] initWithTitle:@"Quit Popzlip" action:@selector(statusQuit:) keyEquivalent:@"q"];
+    quitItem.target = g_settings_target;
+    [menu addItem:quitItem];
+
+    g_status_item.menu = menu;
 }

@@ -2,8 +2,18 @@ import { appendClipboard, getActionsForSelection } from "./actions.ts";
 import { CONFIG_KEYS, configPath, getConfigValue, loadConfig, saveConfig, setConfigValue } from "./config.ts";
 import { Daemon } from "./daemon.ts";
 import { runMcpServer } from "./mcp.ts";
-import { pzNowMs, pzPbWrite, pzRssBytes } from "./native.ts";
-import { accessibilitySelection, nativeSystem, readClipboard } from "./system.ts";
+import { AccessibilityGrantCoordinator } from "./permission.ts";
+import {
+  pzAppInit,
+  pzAppQuit,
+  pzAppRun,
+  pzNowMs,
+  pzPbWrite,
+  pzRssBytes,
+  pzSettingsShow,
+  pzStatusItemCreate,
+} from "./native.ts";
+import { accessibilitySelection, nativeGuidancePort, nativeSchedule, nativeSystem, readClipboard } from "./system.ts";
 
 const VERSION = "0.2.0-scriptc";
 
@@ -20,6 +30,8 @@ Usage:
   popzlip append <text>            Append <text> to the clipboard
   popzlip actions <text>           Print the actions for <text> as JSON
   popzlip bench-engine <n> <text>  Time the action engine over <n> runs
+  popzlip settings                 Open the settings window
+  popzlip permissions             Check and guide Accessibility permission grant
   popzlip --version                Print the version
 
 Options:
@@ -108,6 +120,39 @@ function startMcp(): number {
   return -1;
 }
 
+function runPermissions(args: string[] = []): number {
+  pzAppInit();
+  const force = args.includes("--force") || args.includes("-f");
+  const coordinator = new AccessibilityGrantCoordinator({
+    port: nativeGuidancePort,
+    schedule: nativeSchedule,
+    isGranted: force ? () => false : undefined,
+    onGranted: () => {
+      console.log("Accessibility access granted.");
+    },
+    onDismissed: () => {
+      console.log("Permission guidance dismissed.");
+      pzAppQuit();
+    },
+  });
+  if (!force && coordinator.isGranted()) {
+    console.log("Accessibility access is already granted.");
+    return 0;
+  }
+  console.log("Opening System Settings and presenting guidance HUD...");
+  coordinator.beginGrantFlow();
+  pzAppRun();
+  return 0;
+}
+
+function runSettings(): number {
+  pzAppInit();
+  pzStatusItemCreate();
+  pzSettingsShow();
+  pzAppRun();
+  return 0;
+}
+
 interface Flags {
   simulate: string;
   trace: boolean;
@@ -130,24 +175,39 @@ function parseFlags(argv: string[]): Flags {
   return flags;
 }
 
-const HELP_COMMANDS = ["--help", "-h", "help"];
-const VERSION_COMMANDS = ["--version", "-v"];
+function runHelp(): number {
+  usage();
+  return 0;
+}
+
+function runVersion(): number {
+  console.log(VERSION);
+  return 0;
+}
+
+const COMMANDS: Record<string, (rest: string[]) => number> = {
+  "--help": runHelp,
+  "-h": runHelp,
+  help: runHelp,
+  "--version": runVersion,
+  "-v": runVersion,
+  config: (rest) => runConfig(rest.slice(1)),
+  append: (rest) => runAppend(rest[1] ?? ""),
+  actions: (rest) => runActions(rest[1] ?? ""),
+  "bench-engine": (rest) => runBenchEngine(rest.slice(1)),
+  "--mcp": startMcp,
+  settings: runSettings,
+  setting: runSettings,
+  preferences: runSettings,
+  "--settings": runSettings,
+  permissions: (rest) => runPermissions(rest.slice(1)),
+  permission: (rest) => runPermissions(rest.slice(1)),
+  "--permissions": (rest) => runPermissions(rest.slice(1)),
+};
 
 function runCommand(command: string, rest: string[]): number | null {
-  if (HELP_COMMANDS.includes(command)) {
-    usage();
-    return 0;
-  }
-  if (VERSION_COMMANDS.includes(command)) {
-    console.log(VERSION);
-    return 0;
-  }
-  if (command === "config") return runConfig(rest.slice(1));
-  if (command === "append") return runAppend(rest[1] ?? "");
-  if (command === "actions") return runActions(rest[1] ?? "");
-  if (command === "bench-engine") return runBenchEngine(rest.slice(1));
-  if (command === "--mcp") return startMcp();
-  return null;
+  const run = Object.hasOwn(COMMANDS, command) ? COMMANDS[command] : undefined;
+  return run ? run(rest) : null;
 }
 
 function main(argv: string[]): number {

@@ -51,3 +51,26 @@ export declare function pzPanelShow(): void;
 export declare function pzPanelHide(): void;
 export declare function pzPanelVisible(): boolean;
 export declare function pzPanelPress(actionId: number): boolean;
+export declare function pzGuidancePanelCreate(bundleUrl: string): void;
+export declare function pzGuidancePanelShow(x: number, y: number, width: number, height: number): void;
+export declare function pzGuidancePanelSetFrame(
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  animate: boolean,
+): void;
+export declare function pzGuidancePanelSetPhase(phase: number): void;
+export declare function pzGuidancePanelHide(): void;
+export declare function pzGuidancePanelVisible(): boolean;
+export declare function pzSetGuidanceDismissHandler(handler: (actionId: number) => void): void;
+export declare function pzLocateSettingsWindow(out: Uint8Array): boolean;
+export declare function pzOpenAccessibilitySettings(): boolean;
+export declare function pzSetGuidanceTimerHandler(handler: (timerId: number) => void): void;
+export declare function pzGuidanceSchedule(delayMs: number, timerId: number): void;
+export declare function pzSetActivationHandler(handler: (actionId: number) => void): void;
+export declare function pzSettingsShow(): void;
+export declare function pzSettingsHide(): void;
+export declare function pzSettingsVisible(): boolean;
+export declare function pzStatusItemCreate(): void;
+export declare function pzSetSimulateHandler(handler: (actionId: number) => void): void;

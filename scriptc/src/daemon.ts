@@ -1,3 +1,4 @@
+import { AccessibilityGrantCoordinator } from "./permission.ts";
 import { filterActions, getActionsForSelection } from "./actions.ts";
 import { type Config, popupActionIds } from "./config.ts";
 import { executeAction } from "./executor.ts";
@@ -5,7 +6,6 @@ import { GestureTracker, KEY_DOWN, KEY_ESCAPE, MOUSE_DOWN, SCROLL } from "./gest
 import {
   pzAppInit,
   pzAppRun,
-  pzIsTrusted,
   pzMenuBarHeight,
   pzMonitorStart,
   pzNowMs,
@@ -23,12 +23,15 @@ import {
   pzScreenHeight,
   pzScreenWidth,
   pzSetClickHandler,
+  pzSetSimulateHandler,
   pzSetTimerHandler,
+  pzSettingsShow,
+  pzStatusItemCreate,
   pzTextWidth,
 } from "./native.ts";
 import { calculatePlacement, rectContains } from "./placement.ts";
 import { layoutPopup, type Theme, themeFor } from "./popup.ts";
-import { grabSelection, nativeSystem } from "./system.ts";
+import { grabSelection, nativeGuidancePort, nativeSchedule, nativeSystem } from "./system.ts";
 import type { Action, Rect } from "./types.ts";
 
 const GRAB_DELAY_MS = 45;
@@ -56,7 +59,8 @@ export class Daemon {
   pendingX = 0;
   pendingY = 0;
   mouseUpAt = 0;
-
+  monitorActive = false;
+  grantCoordinator: AccessibilityGrantCoordinator | null = null;
   constructor(cfg: Config, opts: DaemonOptions) {
     this.cfg = cfg;
     this.theme = themeFor(cfg.theme);
@@ -70,6 +74,10 @@ export class Daemon {
   start(): void {
     const startedAt = pzNowMs();
     pzAppInit();
+    pzStatusItemCreate();
+    pzSetSimulateHandler((_actionId: number) => {
+      this.present("Popzlip selection test", pzScreenWidth() / 2, pzScreenHeight() / 2);
+    });
     const bg = this.theme.background;
     pzPanelCreate(this.theme.radius, bg.r, bg.g, bg.b, bg.a);
     const label = this.theme.label;
@@ -83,11 +91,30 @@ export class Daemon {
     } else if (
       pzMonitorStart((kind: number, x: number, y: number, detail: number) => this.onEvent(kind, x, y, detail))
     ) {
+      this.monitorActive = true;
       console.log("popzlip daemon active: listening for text selections.");
     } else {
-      console.error("Could not start the event tap. Grant Accessibility access to popzlip, then restart it.");
+      console.log("Accessibility access required. Presenting Settings and guidance HUD...");
+      pzSettingsShow();
+      this.grantCoordinator = new AccessibilityGrantCoordinator({
+        port: nativeGuidancePort,
+        schedule: nativeSchedule,
+        onGranted: () => {
+          console.log("Accessibility access granted.");
+          if (
+            !this.monitorActive &&
+            pzMonitorStart((kind: number, x: number, y: number, detail: number) => this.onEvent(kind, x, y, detail))
+          ) {
+            this.monitorActive = true;
+            console.log("popzlip daemon active: listening for text selections.");
+          }
+        },
+        onDismissed: () => {
+          this.trace("Permission guidance dismissed.");
+        },
+      });
+      this.grantCoordinator.beginGrantFlow();
     }
-    if (!pzIsTrusted()) this.trace("Accessibility access is not granted.");
     if (this.opts.pressIndex >= 0) pzSchedule(PRESS_DELAY_MS, TIMER_PRESS);
     if (this.opts.exitAfterShowMs > 0) pzSchedule(this.opts.exitAfterShowMs, TIMER_EXIT);
     pzAppRun();

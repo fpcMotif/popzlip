@@ -112,7 +112,129 @@
     { "name": "pzPanelShow", "symbol": "pz_panel_show", "params": [], "returns": "void" },
     { "name": "pzPanelHide", "symbol": "pz_panel_hide", "params": [], "returns": "void" },
     { "name": "pzPanelVisible", "symbol": "pz_panel_visible", "params": [], "returns": "bool" },
-    { "name": "pzPanelPress", "symbol": "pz_panel_press", "params": ["i32"], "returns": "bool" }
+    { "name": "pzPanelPress", "symbol": "pz_panel_press", "params": ["i32"], "returns": "bool" },
+    {
+      "name": "pzGuidancePanelCreate",
+      "symbol": "pz_guidance_panel_create",
+      "params": ["string"],
+      "returns": "void"
+    },
+    {
+      "name": "pzGuidancePanelShow",
+      "symbol": "pz_guidance_panel_show",
+      "params": ["f64", "f64", "f64", "f64"],
+      "returns": "void"
+    },
+    {
+      "name": "pzGuidancePanelSetFrame",
+      "symbol": "pz_guidance_panel_set_frame",
+      "params": ["f64", "f64", "f64", "f64", "bool"],
+      "returns": "void"
+    },
+    {
+      "name": "pzGuidancePanelSetPhase",
+      "symbol": "pz_guidance_panel_set_phase",
+      "params": ["i32"],
+      "returns": "void"
+    },
+    {
+      "name": "pzGuidancePanelHide",
+      "symbol": "pz_guidance_panel_hide",
+      "params": [],
+      "returns": "void"
+    },
+    {
+      "name": "pzGuidancePanelVisible",
+      "symbol": "pz_guidance_panel_visible",
+      "params": [],
+      "returns": "bool"
+    },
+    {
+      "name": "pzSetGuidanceDismissHandler",
+      "symbol": "pz_set_guidance_dismiss_handler",
+      "params": [
+        {
+          "callback": {
+            "id": "guidance_dismiss",
+            "params": ["i32", { "context": "guidance_dismiss" }],
+            "returns": "void",
+            "lifetime": "retained"
+          }
+        },
+        { "context": "guidance_dismiss" }
+      ],
+      "returns": "void"
+    },
+    {
+      "name": "pzLocateSettingsWindow",
+      "symbol": "pz_locate_settings_window",
+      "params": ["mutable-bytes"],
+      "returns": "bool"
+    },
+    {
+      "name": "pzOpenAccessibilitySettings",
+      "symbol": "pz_open_accessibility_settings",
+      "params": [],
+      "returns": "bool"
+    },
+    {
+      "name": "pzSetGuidanceTimerHandler",
+      "symbol": "pz_set_guidance_timer_handler",
+      "params": [
+        {
+          "callback": {
+            "id": "guidance_timer",
+            "params": ["i32", { "context": "guidance_timer" }],
+            "returns": "void",
+            "lifetime": "retained"
+          }
+        },
+        { "context": "guidance_timer" }
+      ],
+      "returns": "void"
+    },
+    {
+      "name": "pzGuidanceSchedule",
+      "symbol": "pz_guidance_schedule",
+      "params": ["f64", "i32"],
+      "returns": "void"
+    },
+    {
+      "name": "pzSetActivationHandler",
+      "symbol": "pz_set_activation_handler",
+      "params": [
+        {
+          "callback": {
+            "id": "activation",
+            "params": ["i32", { "context": "activation" }],
+            "returns": "void",
+            "lifetime": "retained"
+          }
+        },
+        { "context": "activation" }
+      ],
+      "returns": "void"
+    },
+    { "name": "pzSettingsShow", "symbol": "pz_settings_show", "params": [], "returns": "void" },
+    { "name": "pzSettingsHide", "symbol": "pz_settings_hide", "params": [], "returns": "void" },
+    { "name": "pzSettingsVisible", "symbol": "pz_settings_visible", "params": [], "returns": "bool" },
+    { "name": "pzStatusItemCreate", "symbol": "pz_status_item_create", "params": [], "returns": "void" },
+    {
+      "name": "pzSetSimulateHandler",
+      "symbol": "pz_set_simulate_handler",
+      "params": [
+        {
+          "callback": {
+            "id": "simulate",
+            "params": ["i32", { "context": "simulate" }],
+            "returns": "void",
+            "lifetime": "retained"
+          }
+        },
+        { "context": "simulate" }
+      ],
+      "returns": "void"
+    }
   ],
   "libraries": ["../build/libpopzlip_shim.a"],
   "system_libraries": [],
