@@ -1,0 +1,120 @@
+{
+  "ffi_format": 7,
+  "functions": [
+    { "name": "pzAppInit", "symbol": "pz_app_init", "params": [], "returns": "void" },
+    { "name": "pzAppRun", "symbol": "pz_app_run", "params": [], "returns": "void" },
+    { "name": "pzAppQuit", "symbol": "pz_app_quit", "params": [], "returns": "void" },
+    { "name": "pzRssBytes", "symbol": "pz_rss_bytes", "params": [], "returns": "f64" },
+    { "name": "pzNowMs", "symbol": "pz_now_ms", "params": [], "returns": "f64" },
+    { "name": "pzIsTrusted", "symbol": "pz_is_trusted", "params": [], "returns": "bool" },
+    {
+      "name": "pzSetTimerHandler",
+      "symbol": "pz_set_timer_handler",
+      "params": [
+        {
+          "callback": {
+            "id": "timer",
+            "params": ["i32", { "context": "timer" }],
+            "returns": "void",
+            "lifetime": "retained"
+          }
+        },
+        { "context": "timer" }
+      ],
+      "returns": "void"
+    },
+    { "name": "pzSchedule", "symbol": "pz_schedule", "params": ["f64", "i32"], "returns": "void" },
+    { "name": "pzSleepMs", "symbol": "pz_sleep_ms", "params": ["f64"], "returns": "void" },
+    {
+      "name": "pzMonitorStart",
+      "symbol": "pz_monitor_start",
+      "params": [
+        {
+          "callback": {
+            "id": "event",
+            "params": ["i32", "f64", "f64", "i32", { "context": "event" }],
+            "returns": "void",
+            "lifetime": "retained"
+          }
+        },
+        { "context": "event" }
+      ],
+      "returns": "bool"
+    },
+    { "name": "pzFrontmostPid", "symbol": "pz_frontmost_pid", "params": [], "returns": "i32" },
+    { "name": "pzSelfPid", "symbol": "pz_self_pid", "params": [], "returns": "i32" },
+    {
+      "name": "pzAxSelectedText",
+      "symbol": "pz_ax_selected_text",
+      "params": ["i32", "mutable-bytes"],
+      "returns": "i32"
+    },
+    { "name": "pzPressCopyMenu", "symbol": "pz_press_copy_menu", "params": ["i32"], "returns": "i32" },
+    { "name": "pzPbChangeCount", "symbol": "pz_pb_change_count", "params": [], "returns": "i32" },
+    { "name": "pzPbRead", "symbol": "pz_pb_read", "params": ["mutable-bytes"], "returns": "i32" },
+    { "name": "pzPbWrite", "symbol": "pz_pb_write", "params": ["string"], "returns": "void" },
+    { "name": "pzPbSnapshot", "symbol": "pz_pb_snapshot", "params": [], "returns": "void" },
+    { "name": "pzPbRestore", "symbol": "pz_pb_restore", "params": [], "returns": "void" },
+    { "name": "pzOpenUrl", "symbol": "pz_open_url", "params": ["string"], "returns": "bool" },
+    { "name": "pzRunAppleScript", "symbol": "pz_run_applescript", "params": ["string"], "returns": "bool" },
+    { "name": "pzRunShell", "symbol": "pz_run_shell", "params": ["string"], "returns": "bool" },
+    { "name": "pzScreenWidth", "symbol": "pz_screen_width", "params": [], "returns": "f64" },
+    { "name": "pzScreenHeight", "symbol": "pz_screen_height", "params": [], "returns": "f64" },
+    { "name": "pzMenuBarHeight", "symbol": "pz_menu_bar_height", "params": [], "returns": "f64" },
+    { "name": "pzTextWidth", "symbol": "pz_text_width", "params": ["string", "f64", "bool"], "returns": "f64" },
+    {
+      "name": "pzSetClickHandler",
+      "symbol": "pz_set_click_handler",
+      "params": [
+        {
+          "callback": {
+            "id": "click",
+            "params": ["i32", { "context": "click" }],
+            "returns": "void",
+            "lifetime": "retained"
+          }
+        },
+        { "context": "click" }
+      ],
+      "returns": "void"
+    },
+    {
+      "name": "pzPanelCreate",
+      "symbol": "pz_panel_create",
+      "params": ["f64", "f64", "f64", "f64", "f64"],
+      "returns": "void"
+    },
+    {
+      "name": "pzPanelSetLabelColor",
+      "symbol": "pz_panel_set_label_color",
+      "params": ["f64", "f64", "f64", "f64"],
+      "returns": "void"
+    },
+    { "name": "pzPanelClear", "symbol": "pz_panel_clear", "params": [], "returns": "void" },
+    {
+      "name": "pzPanelAddButton",
+      "symbol": "pz_panel_add_button",
+      "params": ["i32", "string", "f64", "f64", "f64", "f64", "f64"],
+      "returns": "void"
+    },
+    {
+      "name": "pzPanelAddSeparator",
+      "symbol": "pz_panel_add_separator",
+      "params": ["f64", "f64", "f64", "f64", "f64", "f64", "f64"],
+      "returns": "void"
+    },
+    {
+      "name": "pzPanelSetFrame",
+      "symbol": "pz_panel_set_frame",
+      "params": ["f64", "f64", "f64", "f64"],
+      "returns": "void"
+    },
+    { "name": "pzPanelShow", "symbol": "pz_panel_show", "params": [], "returns": "void" },
+    { "name": "pzPanelHide", "symbol": "pz_panel_hide", "params": [], "returns": "void" },
+    { "name": "pzPanelVisible", "symbol": "pz_panel_visible", "params": [], "returns": "bool" },
+    { "name": "pzPanelPress", "symbol": "pz_panel_press", "params": ["i32"], "returns": "bool" }
+  ],
+  "libraries": ["../build/libpopzlip_shim.a"],
+  "system_libraries": [],
+  "frameworks": ["AppKit", "ApplicationServices", "Foundation", "CoreGraphics"]
+}
