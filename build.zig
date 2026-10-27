@@ -41,7 +41,7 @@ pub fn build(b: *std.Build) void {
         exe.root_module.linkFramework(f, .{});
     }
     exe.root_module.linkSystemLibrary("objc", .{});
-
+    exe.root_module.addCSourceFile(.{ .file = b.path("src/event_tap.m"), .flags = &.{"-fobjc-arc"} });
     b.installArtifact(exe);
 
     // Shared library for XCTest and C callers
@@ -55,6 +55,11 @@ pub fn build(b: *std.Build) void {
             .link_libc = true,
         }),
     });
+    for (frameworks) |f| {
+        lib.root_module.linkFramework(f, .{});
+    }
+    lib.root_module.linkSystemLibrary("objc", .{});
+    lib.root_module.addCSourceFile(.{ .file = b.path("src/event_tap.m"), .flags = &.{"-fobjc-arc"} });
     b.installArtifact(lib);
 
     // Run step

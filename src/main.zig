@@ -10,6 +10,54 @@ const popclip_ui = @import("ui.zig");
 const mcp_mod = @import("mcp.zig");
 const config_mod = @import("config.zig");
 extern "c" fn system(command: [*:0]const u8) c_int;
+extern "c" fn popzlip_start_event_monitor(
+    trigger_cb: ?*const fn (mouse_x: f64, mouse_y: f64, selected_text: [*:0]const u8, user_data: ?*anyopaque) callconv(.c) void,
+    dismiss_cb: ?*const fn (user_data: ?*anyopaque) callconv(.c) void,
+    user_data: ?*anyopaque,
+) c_int;
+extern "c" fn popzlip_stop_event_monitor() void;
+extern "c" fn popzlip_set_window_frame(x: f64, y: f64, w: f64, h: f64) void;
+extern "c" fn popzlip_mark_window_visible(visible: bool) void;
+
+var g_state_ptr: ?*popclip_ui.PopClipState = null;
+
+fn onSelectionTrigger(mouse_x: f64, mouse_y: f64, text_ptr: [*:0]const u8, user_data: ?*anyopaque) callconv(.c) void {
+    _ = user_data;
+    const s = g_state_ptr orelse return;
+    const text = std.mem.span(text_ptr);
+    if (text.len == 0) return;
+
+    s.setSelection(text);
+    if (s.actions_list.len == 0) return;
+
+    const popup_width: f64 = @max(160.0, @as(f64, @floatFromInt(s.actions_list.len * 56)));
+    const popup_height: f64 = 28.0;
+
+    const screen_w: f64 = 1728;
+    const screen_h: f64 = 1117;
+    const sel_rect = types.Rect{ .x = mouse_x, .y = mouse_y, .width = 1.0, .height = 1.0 };
+    const p = placement.calculatePlacement(sel_rect, popup_width, popup_height, .{
+        .width = screen_w,
+        .height = screen_h,
+        .menu_bar_height = 32,
+        .margin = 12,
+    });
+
+    if (s.window) |w| {
+        w.setSize(p.width, p.height);
+        w.setPosition(p.x, p.y);
+        w.show();
+        popzlip_set_window_frame(p.x, p.y, p.width, p.height);
+        popzlip_mark_window_visible(true);
+    }
+}
+
+fn onDismiss(user_data: ?*anyopaque) callconv(.c) void {
+    _ = user_data;
+    const s = g_state_ptr orelse return;
+    s.dismiss();
+}
+
 pub fn main(init: std.process.Init) !void {
     const allocator = init.arena.allocator();
     var args = init.minimal.args.iterate();
@@ -68,20 +116,8 @@ pub fn main(init: std.process.Init) !void {
         return;
     }
 
-    const text_to_show = simulate_text orelse "https://github.com/justrach/nanoui";
-
-    std.debug.print(
-        \\=======================================================
-        \\  PopClip (Zig + NanoUI) — Ultra-Lightweight & Fast
-        \\=======================================================
-        \\Selected Text: "{s}"
-        \\Memory RSS:    {d:.2} MB (PopClip Swift baseline: 47.4 MB)
-        \\
-    , .{ text_to_show, macos.getProcessRssMB() });
-
-    // Initialize NanoUI App
     const app = try nanoui.App.create(init, .{
-        .name = "PopClip",
+        .name = "popzlip",
     });
     defer app.destroy();
 
@@ -89,39 +125,33 @@ pub fn main(init: std.process.Init) !void {
         .allocator = allocator,
         .app = app,
     };
-    state.setSelection(text_to_show);
-
-    // Calculate placement centered on screen
-    const screen_w: f64 = 1728;
-    const screen_h: f64 = 1117;
-    const sel_mock = types.Rect{ .x = screen_w / 2.0 - 100, .y = screen_h / 2.0, .width = 200, .height = 24 };
-    const popup_width: f64 = @max(160.0, @as(f64, @floatFromInt(state.actions_list.len * 56)));
-    const popup_height: f64 = 28.0;
-
-    const p = placement.calculatePlacement(
-        sel_mock,
-        popup_width,
-        popup_height,
-        .{ .width = screen_w, .height = screen_h, .menu_bar_height = 32, .margin = 12 },
-    );
+    g_state_ptr = &state;
 
     const win = try app.newWindow(.{
-        .title = "PopClip",
-        .width = p.width,
-        .height = p.height,
-        .x = p.x,
-        .y = p.y,
+        .title = "popzlip",
+        .width = 160,
+        .height = 28,
         .resizable = false,
+        .visible = false,
         .title_bar = .popover,
         .content = .{ .view = .init(&state, popclip_ui.PopClipState.view) },
     });
     state.window = win;
 
-    std.debug.print("Showing floating NanoUI popover at ({d:.1}, {d:.1}), size ({d:.1} x {d:.1})...\n", .{
-        p.x, p.y, p.width, p.height,
-    });
+    const monitor_ok = popzlip_start_event_monitor(&onSelectionTrigger, &onDismiss, null);
+    if (monitor_ok != 0) {
+        std.debug.print("Warning: Could not start CGEventTap. Please grant Accessibility permissions to this terminal / popzlip.\n", .{});
+    } else {
+        std.debug.print("popzlip daemon active: listening for mouse drag selections across macOS...\n", .{});
+    }
+    defer popzlip_stop_event_monitor();
 
-    win.show();
+    if (simulate_text) |text| {
+        state.setSelection(text);
+        win.show();
+        popzlip_mark_window_visible(true);
+    }
+
     try app.run();
 }
 

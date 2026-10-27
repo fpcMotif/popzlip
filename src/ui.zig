@@ -171,5 +171,8 @@ pub const PopClipState = struct {
         if (self.window) |w| {
             w.hide();
         }
+        popzlip_mark_window_visible(false);
     }
 };
+
+extern "c" fn popzlip_mark_window_visible(visible: bool) void;
