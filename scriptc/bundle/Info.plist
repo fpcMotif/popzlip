@@ -20,5 +20,7 @@
     <true/>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>Popzlip TS saves the text you select to Notes and Drafts.</string>
 </dict>
 </plist>

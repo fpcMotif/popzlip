@@ -26,8 +26,32 @@ export function searchUrl(template: string, text: string): string {
   return template.includes("{query}") ? template.split("{query}").join(query) : template + query;
 }
 
-export function notesScript(text: string): string {
-  return `tell application "Notes" to tell default account to make new note with properties {body:"${escapeForAppleScript(text)}"}`;
+function escapeHtml(text: string): string {
+  return text.split("&").join("&amp;").split("<").join("&lt;").split(">").join("&gt;").split("\n").join("<br>");
+}
+
+function notesScript(text: string, title: string): string {
+  const entry = escapeForAppleScript(`<div>${escapeHtml(text)}</div>`);
+  if (title.length === 0) {
+    return `tell application "Notes" to tell default account to make new note with properties {body:"${entry}"}`;
+  }
+  const heading = escapeForAppleScript(`<h1>${escapeHtml(title)}</h1>`);
+  return [
+    'tell application "Notes"',
+    `  set matches to notes of default folder of default account whose name is "${escapeForAppleScript(title)}"`,
+    "  if (count of matches) is 0 then",
+    `    make new note at default folder of default account with properties {body:"${heading}${entry}"}`,
+    "  else",
+    "    set inbox to item 1 of matches",
+    `    set body of inbox to (body of inbox) & "${entry}"`,
+    "  end if",
+    "end tell",
+  ].join("\n");
+}
+
+function draftsScript(text: string, tag: string): string {
+  const tags = tag.length > 0 ? `, tag list:{"${escapeForAppleScript(tag)}"}` : "";
+  return `tell application "Drafts" to make new draft with properties {content:"${escapeForAppleScript(text)}", flagged:false${tags}}`;
 }
 
 function runClipboardAction(act: Action, text: string, sys: SystemPort): string | null {
@@ -64,12 +88,20 @@ function runOpenAction(act: Action, text: string, cfg: Config, sys: SystemPort):
   if (act.kind === "dictionary") {
     return sys.openUrl(`dict://${urlEncode(text.trim())}`) ? "Opened Dictionary." : "Could not open Dictionary.";
   }
+  if (act.kind === "claude") {
+    return sys.openUrl(`claude://claude.ai/new?q=${urlEncode(text)}`) ? "Opened Claude." : "Could not open Claude.";
+  }
   return null;
 }
 
-function runAppAction(act: Action, text: string, sys: SystemPort): string | null {
+function runAppAction(act: Action, text: string, cfg: Config, sys: SystemPort): string | null {
   if (act.kind === "notes") {
-    return sys.runAppleScript(notesScript(text)) ? "Created a note in Notes." : "Notes did not accept the note.";
+    return sys.runAppleScript(notesScript(text, cfg.notesTitle)) ? "Saved to Notes." : "Notes did not accept the text.";
+  }
+  if (act.kind === "drafts") {
+    return sys.runAppleScript(draftsScript(text, cfg.draftsTag))
+      ? "Saved to Drafts."
+      : "Drafts did not accept the text.";
   }
   if (act.kind === "terminal") {
     return sys.runShell(text) ? "Started the command." : "Could not start the command.";
@@ -79,7 +111,7 @@ function runAppAction(act: Action, text: string, sys: SystemPort): string | null
 
 export function executeAction(act: Action, text: string, cfg: Config, sys: SystemPort): string {
   const result =
-    runClipboardAction(act, text, sys) ?? runOpenAction(act, text, cfg, sys) ?? runAppAction(act, text, sys);
+    runClipboardAction(act, text, sys) ?? runOpenAction(act, text, cfg, sys) ?? runAppAction(act, text, cfg, sys);
   if (result !== null) return result;
   const transformed = transformFor(act.kind, text);
   if (transformed === null) return "No change.";

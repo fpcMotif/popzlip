@@ -309,6 +309,8 @@ export function getActionsForSelection(text: string, canPaste: boolean): Action[
     list.push(action("terminal", ">_", "terminal", ""));
     list.push(action("append", "+", "append_clipboard", ""));
     list.push(action("notes", "Notes", "notes", ""));
+    list.push(action("drafts", "Drafts", "drafts", ""));
+    list.push(action("claude", "Claude", "claude", ""));
     list.push(action("search", "Search", "search", ""));
     if (isUrl(trimmed)) list.push(action("open_url", "Open Link", "open_url", trimmed));
     if (isEmail(trimmed)) list.push(action("email", "Email", "email", trimmed));

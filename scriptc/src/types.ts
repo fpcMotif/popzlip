@@ -17,7 +17,9 @@ export type ActionKind =
   | "word_count"
   | "terminal"
   | "append_clipboard"
-  | "notes";
+  | "notes"
+  | "drafts"
+  | "claude";
 
 export interface Action {
   id: string;

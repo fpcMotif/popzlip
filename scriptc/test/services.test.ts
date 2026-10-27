@@ -12,7 +12,7 @@ import {
   saveConfig,
   setConfigValue,
 } from "../src/config.ts";
-import { executeAction, notesScript, searchUrl, type SystemPort } from "../src/executor.ts";
+import { executeAction, searchUrl, type SystemPort } from "../src/executor.ts";
 import { handleRequest, type McpHost } from "../src/mcp.ts";
 
 class FakeSystem implements SystemPort {
@@ -71,11 +71,19 @@ describe("config", () => {
     expect(loadConfig("/definitely/missing/config.json").theme).toBe("dark");
   });
 
-  test("popup shows only append and notes by default, and respects the enable flags", () => {
+  test("popup shows append, notes, drafts and claude by default, and respects the enable flags", () => {
     const cfg = defaultConfig();
-    expect(popupActionIds(cfg)).toEqual(["append", "notes"]);
+    expect(popupActionIds(cfg)).toEqual(["append", "notes", "drafts", "claude"]);
     setConfigValue(cfg, "enable_notes", "false");
-    expect(popupActionIds(cfg)).toEqual(["append"]);
+    expect(popupActionIds(cfg)).toEqual(["append", "drafts", "claude"]);
+  });
+
+  test("notes_title and drafts_tag are settings with defaults", () => {
+    const cfg = defaultConfig();
+    expect(getConfigValue(cfg, "notes_title")).toBe("Popzlip Inbox");
+    expect(getConfigValue(cfg, "drafts_tag")).toBe("popzlip");
+    expect(setConfigValue(cfg, "notes_title", "Reading")).toBe(true);
+    expect(parseConfig('{"drafts_tag":"inbox"}').draftsTag).toBe("inbox");
   });
 });
 
@@ -88,12 +96,46 @@ describe("executeAction", () => {
     executeAction(act("Appended Line (™)", "append"), "Appended Line (™)", cfg, sys);
     expect(sys.clipboard).toBe("Initial Line\nAppended Line (™)");
   });
+});
 
-  test("notes sends one AppleScript with quotes escaped", () => {
+describe("send to apps", () => {
+  const cfg = defaultConfig();
+
+  test("notes appends the selection as escaped HTML to the inbox note without activating Notes", () => {
     const sys = new FakeSystem();
-    executeAction(act('it\'s "quoted"', "notes"), 'it\'s "quoted"', cfg, sys);
-    expect(sys.scripts).toEqual([notesScript('it\'s "quoted"')]);
-    expect(sys.scripts[0]).toContain('{body:"it\'s \\"quoted\\""}');
+    const text = 'a <b> & "c"\nd';
+    executeAction(act(text, "notes"), text, cfg, sys);
+    const script = sys.scripts[0] ?? "";
+    expect(sys.scripts).toHaveLength(1);
+    expect(script).toContain('notes of default folder of default account whose name is "Popzlip Inbox"');
+    expect(script).toContain("make new note at default folder of default account");
+    expect(script).toContain('<div>a &lt;b&gt; &amp; \\"c\\"<br>d</div>');
+    expect(script).not.toContain("activate");
+  });
+
+  test("notes makes a new note per selection when notes_title is empty", () => {
+    const sys = new FakeSystem();
+    const own = defaultConfig();
+    setConfigValue(own, "notes_title", "");
+    executeAction(act("hi", "notes"), "hi", own, sys);
+    expect(sys.scripts).toEqual([
+      'tell application "Notes" to tell default account to make new note with properties {body:"<div>hi</div>"}',
+    ]);
+  });
+
+  test("drafts creates a tagged draft through AppleScript without opening Drafts", () => {
+    const sys = new FakeSystem();
+    executeAction(act('say "hi"', "drafts"), 'say "hi"', cfg, sys);
+    expect(sys.scripts).toEqual([
+      'tell application "Drafts" to make new draft with properties {content:"say \\"hi\\"", flagged:false, tag list:{"popzlip"}}',
+    ]);
+    expect(sys.opened).toEqual([]);
+  });
+
+  test("claude opens a new Claude chat with the selection filled in", () => {
+    const sys = new FakeSystem();
+    executeAction(act("hello world!", "claude"), "hello world!", cfg, sys);
+    expect(sys.opened).toEqual(["claude://claude.ai/new?q=hello+world%21"]);
   });
 
   test("search uses the configured engine template", () => {

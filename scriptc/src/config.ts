@@ -10,6 +10,8 @@ export interface Config {
   enableNotes: boolean;
   enableMath: boolean;
   popupActions: string;
+  notesTitle: string;
+  draftsTag: string;
 }
 
 export const CONFIG_KEYS = [
@@ -20,6 +22,8 @@ export const CONFIG_KEYS = [
   "enable_notes",
   "enable_math",
   "popup_actions",
+  "notes_title",
+  "drafts_tag",
 ];
 
 export function defaultConfig(): Config {
@@ -30,7 +34,9 @@ export function defaultConfig(): Config {
     enableAppend: true,
     enableNotes: true,
     enableMath: true,
-    popupActions: "append,notes",
+    popupActions: "append,notes,drafts,claude",
+    notesTitle: "Popzlip Inbox",
+    draftsTag: "popzlip",
   };
 }
 
@@ -38,14 +44,20 @@ function parseBool(value: string): boolean {
   return value === "true" || value === "1";
 }
 
+function boolText(value: boolean): string {
+  return value ? "true" : "false";
+}
+
 export function getConfigValue(cfg: Config, key: string): string | null {
   if (key === "search_engine") return cfg.searchEngine;
   if (key === "terminal_app") return cfg.terminalApp;
   if (key === "theme") return cfg.theme;
-  if (key === "enable_append") return cfg.enableAppend ? "true" : "false";
-  if (key === "enable_notes") return cfg.enableNotes ? "true" : "false";
-  if (key === "enable_math") return cfg.enableMath ? "true" : "false";
+  if (key === "enable_append") return boolText(cfg.enableAppend);
+  if (key === "enable_notes") return boolText(cfg.enableNotes);
+  if (key === "enable_math") return boolText(cfg.enableMath);
   if (key === "popup_actions") return cfg.popupActions;
+  if (key === "notes_title") return cfg.notesTitle;
+  if (key === "drafts_tag") return cfg.draftsTag;
   return null;
 }
 
@@ -57,6 +69,8 @@ export function setConfigValue(cfg: Config, key: string, value: string): boolean
   else if (key === "enable_notes") cfg.enableNotes = parseBool(value);
   else if (key === "enable_math") cfg.enableMath = parseBool(value);
   else if (key === "popup_actions") cfg.popupActions = value;
+  else if (key === "notes_title") cfg.notesTitle = value;
+  else if (key === "drafts_tag") cfg.draftsTag = value;
   else return false;
   return true;
 }
