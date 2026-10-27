@@ -242,6 +242,44 @@ pub fn appendClipboard(allocator: std.mem.Allocator, current: ?[]const u8, addit
     }
     return allocator.dupe(u8, addition);
 }
+pub fn urlEncode(allocator: std.mem.Allocator, text: []const u8) ![]u8 {
+    var out: std.ArrayListUnmanaged(u8) = .empty;
+    defer out.deinit(allocator);
+
+    const hex = "0123456789ABCDEF";
+    for (text) |c| {
+        if (std.ascii.isAlphanumeric(c) or c == '-' or c == '_' or c == '.' or c == '~') {
+            try out.append(allocator, c);
+        } else if (c == ' ') {
+            try out.append(allocator, '+');
+        } else {
+            try out.append(allocator, '%');
+            try out.append(allocator, hex[(c >> 4) & 0x0F]);
+            try out.append(allocator, hex[c & 0x0F]);
+        }
+    }
+    return out.toOwnedSlice(allocator);
+}
+
+pub fn escapeForAppleScript(allocator: std.mem.Allocator, text: []const u8) ![]u8 {
+    var out: std.ArrayListUnmanaged(u8) = .empty;
+    defer out.deinit(allocator);
+
+    for (text) |c| {
+        if (c == '"' or c == '\\') {
+            try out.append(allocator, '\\');
+            try out.append(allocator, c);
+        } else if (c == '\n') {
+            try out.appendSlice(allocator, "\\n");
+        } else if (c == '\r') {
+            try out.appendSlice(allocator, "\\r");
+        } else {
+            try out.append(allocator, c);
+        }
+    }
+    return out.toOwnedSlice(allocator);
+}
+
 
 
 // MARK: - Word & Character Stats
@@ -494,4 +532,18 @@ test "appendClipboard correctly appends to clipboard" {
     const empty_res = try appendClipboard(allocator, null, "Only line");
     defer allocator.free(empty_res);
     try std.testing.expectEqualStrings("Only line", empty_res);
+}
+
+test "urlEncode correctly percent-encodes spaces and special symbols" {
+    const allocator = std.testing.allocator;
+    const encoded = try urlEncode(allocator, "The trademark symbol (™)");
+    defer allocator.free(encoded);
+    try std.testing.expectEqualStrings("The+trademark+symbol+%28%E2%84%A2%29", encoded);
+}
+
+test "escapeForAppleScript escapes quotes and newlines" {
+    const allocator = std.testing.allocator;
+    const escaped = try escapeForAppleScript(allocator, "He said \"hello\"\nNext line");
+    defer allocator.free(escaped);
+    try std.testing.expectEqualStrings("He said \\\"hello\\\"\\nNext line", escaped);
 }

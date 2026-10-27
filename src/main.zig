@@ -18,7 +18,7 @@ extern "c" fn popzlip_start_event_monitor(
 extern "c" fn popzlip_stop_event_monitor() void;
 extern "c" fn popzlip_set_window_frame(x: f64, y: f64, w: f64, h: f64) void;
 extern "c" fn popzlip_mark_window_visible(visible: bool) void;
-
+extern "c" fn popzlip_get_screen_size(out_w: *f64, out_h: *f64) void;
 var g_state_ptr: ?*popclip_ui.PopClipState = null;
 
 fn onSelectionTrigger(mouse_x: f64, mouse_y: f64, text_ptr: [*:0]const u8, user_data: ?*anyopaque) callconv(.c) void {
@@ -30,11 +30,13 @@ fn onSelectionTrigger(mouse_x: f64, mouse_y: f64, text_ptr: [*:0]const u8, user_
     s.setSelection(text);
     if (s.actions_list.len == 0) return;
 
-    const popup_width: f64 = @max(160.0, @as(f64, @floatFromInt(s.actions_list.len * 56)));
+    const popup_width: f64 = @max(160.0, @as(f64, @floatFromInt(s.actions_list.len * 52)));
     const popup_height: f64 = 28.0;
 
-    const screen_w: f64 = 1728;
-    const screen_h: f64 = 1117;
+    var screen_w: f64 = 1920.0;
+    var screen_h: f64 = 1080.0;
+    popzlip_get_screen_size(&screen_w, &screen_h);
+
     const sel_rect = types.Rect{ .x = mouse_x, .y = mouse_y, .width = 1.0, .height = 1.0 };
     const p = placement.calculatePlacement(sel_rect, popup_width, popup_height, .{
         .width = screen_w,

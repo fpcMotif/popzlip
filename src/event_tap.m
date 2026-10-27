@@ -35,66 +35,137 @@ void popzlip_mark_window_visible(bool visible) {
     g_win_visible = visible;
 }
 
+void popzlip_get_screen_size(double *out_w, double *out_h) {
+    NSScreen *screen = [NSScreen mainScreen];
+    if (screen) {
+        *out_w = screen.frame.size.width;
+        *out_h = screen.frame.size.height;
+    } else {
+        *out_w = 1920.0;
+        *out_h = 1080.0;
+    }
+}
+
+static AXUIElementRef getCopyMenuItem(AXUIElementRef appRef) {
+    CFTypeRef menuBarRef = NULL;
+    if (AXUIElementCopyAttributeValue(appRef, kAXMenuBarAttribute, &menuBarRef) != kAXErrorSuccess || !menuBarRef) {
+        return NULL;
+    }
+    CFTypeRef menusRef = NULL;
+    if (AXUIElementCopyAttributeValue((AXUIElementRef)menuBarRef, kAXChildrenAttribute, &menusRef) != kAXErrorSuccess || !menusRef) {
+        CFRelease(menuBarRef);
+        return NULL;
+    }
+    NSArray *menus = (__bridge NSArray *)menusRef;
+    NSUInteger checkIndices[] = {3, 2, 4, 1, 5};
+    for (size_t idx = 0; idx < sizeof(checkIndices) / sizeof(checkIndices[0]); idx++) {
+        NSUInteger i = checkIndices[idx];
+        if (i >= menus.count) continue;
+        AXUIElementRef menu = (__bridge AXUIElementRef)menus[i];
+        CFTypeRef subRef = NULL;
+        if (AXUIElementCopyAttributeValue(menu, kAXChildrenAttribute, &subRef) == kAXErrorSuccess && subRef) {
+            NSArray *subs = (__bridge NSArray *)subRef;
+            if (subs.count > 0) {
+                AXUIElementRef actualMenu = (__bridge AXUIElementRef)subs[0];
+                CFTypeRef itemsRef = NULL;
+                if (AXUIElementCopyAttributeValue(actualMenu, kAXChildrenAttribute, &itemsRef) == kAXErrorSuccess && itemsRef) {
+                    NSArray *items = (__bridge NSArray *)itemsRef;
+                    for (id it in items) {
+                        CFTypeRef titleRef = NULL;
+                        AXUIElementCopyAttributeValue((__bridge AXUIElementRef)it, kAXTitleAttribute, &titleRef);
+                        NSString *title = (__bridge NSString *)titleRef;
+                        if (title && ([title isEqualToString:@"Copy"] || [title isEqualToString:@"拷贝"] || [title isEqualToString:@"复制"])) {
+                            if (titleRef) CFRelease(titleRef);
+                            CFRetain((__bridge CFTypeRef)it);
+                            CFRelease(itemsRef);
+                            CFRelease(subRef);
+                            CFRelease(menusRef);
+                            CFRelease(menuBarRef);
+                            return (__bridge AXUIElementRef)it;
+                        }
+                        if (titleRef) CFRelease(titleRef);
+                    }
+                    CFRelease(itemsRef);
+                }
+            }
+            CFRelease(subRef);
+        }
+    }
+    CFRelease(menusRef);
+    CFRelease(menuBarRef);
+    return NULL;
+}
+
 int popzlip_grab_selection(char *out_buf, int max_len) {
     @autoreleasepool {
         NSRunningApplication *frontApp = [[NSWorkspace sharedWorkspace] frontmostApplication];
-        if (frontApp && frontApp.processIdentifier != getpid()) {
-            AXUIElementRef appRef = AXUIElementCreateApplication(frontApp.processIdentifier);
-            AXUIElementRef focused = NULL;
-            if (AXUIElementCopyAttributeValue(appRef, kAXFocusedUIElementAttribute, (CFTypeRef *)&focused) == kAXErrorSuccess && focused) {
-                CFTypeRef selText = NULL;
-                if (AXUIElementCopyAttributeValue(focused, kAXSelectedTextAttribute, &selText) == kAXErrorSuccess && selText) {
-                    NSString *str = (__bridge NSString *)selText;
-                    if (str.length > 0) {
-                        const char *utf = [str UTF8String];
-                        int len = (int)strlen(utf);
-                        if (len < max_len) {
-                            memcpy(out_buf, utf, len);
-                            out_buf[len] = 0;
-                            CFRelease(selText);
-                            CFRelease(focused);
-                            CFRelease(appRef);
-                            return len;
-                        }
-                    }
-                    CFRelease(selText);
-                }
-                CFRelease(focused);
-            }
-            CFRelease(appRef);
+        if (!frontApp || frontApp.processIdentifier == getpid()) {
+            return 0;
         }
 
-        NSPasteboard *pb = [NSPasteboard generalPasteboard];
-        NSInteger initialCount = [pb changeCount];
+        AXUIElementRef appRef = AXUIElementCreateApplication(frontApp.processIdentifier);
 
-        CGEventSourceRef src = CGEventSourceCreate(kCGEventSourceStateHIDSystemState);
-        CGEventRef keyDown = CGEventCreateKeyboardEvent(src, 0x08, true);
-        CGEventSetFlags(keyDown, kCGEventFlagMaskCommand);
-        CGEventPost(kCGHIDEventTap, keyDown);
-
-        CGEventRef keyUp = CGEventCreateKeyboardEvent(src, 0x08, false);
-        CGEventSetFlags(keyUp, kCGEventFlagMaskCommand);
-        CGEventPost(kCGHIDEventTap, keyUp);
-
-        CFRelease(keyDown);
-        CFRelease(keyUp);
-        CFRelease(src);
-
-        for (int i = 0; i < 15; i++) {
-            usleep(5000);
-            if ([pb changeCount] != initialCount) {
-                NSString *copied = [pb stringForType:NSPasteboardTypeString];
-                if (copied && copied.length > 0) {
-                    const char *utf = [copied UTF8String];
+        AXUIElementRef focused = NULL;
+        if (AXUIElementCopyAttributeValue(appRef, kAXFocusedUIElementAttribute, (CFTypeRef *)&focused) == kAXErrorSuccess && focused) {
+            CFTypeRef selText = NULL;
+            if (AXUIElementCopyAttributeValue(focused, kAXSelectedTextAttribute, &selText) == kAXErrorSuccess && selText) {
+                NSString *str = (__bridge NSString *)selText;
+                if (str.length > 0) {
+                    const char *utf = [str UTF8String];
                     int len = (int)strlen(utf);
                     if (len < max_len) {
                         memcpy(out_buf, utf, len);
                         out_buf[len] = 0;
+                        CFRelease(selText);
+                        CFRelease(focused);
+                        CFRelease(appRef);
                         return len;
                     }
                 }
+                CFRelease(selText);
             }
+            CFRelease(focused);
         }
+
+        AXUIElementRef copyItem = getCopyMenuItem(appRef);
+        if (copyItem) {
+            CFTypeRef enabledRef = NULL;
+            AXUIElementCopyAttributeValue(copyItem, kAXEnabledAttribute, &enabledRef);
+            BOOL enabled = enabledRef ? [(__bridge NSNumber *)enabledRef boolValue] : NO;
+            if (enabledRef) CFRelease(enabledRef);
+
+            if (!enabled) {
+                CFRelease(copyItem);
+                CFRelease(appRef);
+                return 0;
+            }
+
+            NSPasteboard *pb = [NSPasteboard generalPasteboard];
+            NSInteger initialCount = [pb changeCount];
+
+            AXUIElementPerformAction(copyItem, kAXPressAction);
+            CFRelease(copyItem);
+            CFRelease(appRef);
+
+            for (int i = 0; i < 15; i++) {
+                usleep(5000);
+                if ([pb changeCount] != initialCount) {
+                    NSString *copied = [pb stringForType:NSPasteboardTypeString];
+                    if (copied && copied.length > 0) {
+                        const char *utf = [copied UTF8String];
+                        int len = (int)strlen(utf);
+                        if (len < max_len) {
+                            memcpy(out_buf, utf, len);
+                            out_buf[len] = 0;
+                            return len;
+                        }
+                    }
+                }
+            }
+            return 0;
+        }
+
+        CFRelease(appRef);
     }
     return 0;
 }
@@ -132,11 +203,13 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy, CGEventType type, CGEv
         g_drag_count = 0;
 
         if (isSelect && g_trigger_cb) {
-            char buf[4096];
-            int len = popzlip_grab_selection(buf, sizeof(buf));
-            if (len > 0) {
-                g_trigger_cb(pt.x, pt.y, buf, g_user_data);
-            }
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(45 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+                char buf[4096];
+                int len = popzlip_grab_selection(buf, sizeof(buf));
+                if (len > 0) {
+                    g_trigger_cb(pt.x, pt.y, buf, g_user_data);
+                }
+            });
         }
     } else if (type == kCGEventScrollWheel) {
         if (g_win_visible && g_dismiss_cb) {

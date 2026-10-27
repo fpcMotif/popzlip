@@ -84,8 +84,10 @@ pub const PopClipState = struct {
             .notes => {
                 var arena = std.heap.ArenaAllocator.init(self.allocator);
                 defer arena.deinit();
-                const script = std.fmt.allocPrint(arena.allocator(), "tell application \"Notes\" to tell default account to make new note with properties {{body:\"{s}\"}}", .{self.selected_text}) catch return;
-                const cmd = std.fmt.allocPrint(arena.allocator(), "osascript -e '{s}'", .{script}) catch return;
+                const alloc = arena.allocator();
+                const escaped = actions.escapeForAppleScript(alloc, self.selected_text) catch return;
+                const script = std.fmt.allocPrint(alloc, "tell application \"Notes\" to tell default account to make new note with properties {{body:\"{s}\"}}", .{escaped}) catch return;
+                const cmd = std.fmt.allocPrint(alloc, "osascript -e '{s}'", .{script}) catch return;
                 macos.runShellScript(cmd) catch {};
                 self.dismiss();
             },
@@ -93,16 +95,14 @@ pub const PopClipState = struct {
                 var arena = std.heap.ArenaAllocator.init(self.allocator);
                 defer arena.deinit();
                 const alloc = arena.allocator();
-                const encoded_url = std.fmt.allocPrint(alloc, "https://www.google.com/search?q={s}", .{self.selected_text}) catch return;
-                macos.openUrl(encoded_url) catch {};
+                const encoded_query = actions.urlEncode(alloc, self.selected_text) catch return;
+                const encoded_url = std.fmt.allocPrint(alloc, "https://www.google.com/search?q={s}", .{encoded_query}) catch return;
+                _ = nanoui.shell.openUrl(encoded_url);
                 self.dismiss();
             },
             .open_url => {
-                if (act.payload) |u| {
-                    macos.openUrl(u) catch {};
-                } else {
-                    macos.openUrl(self.selected_text) catch {};
-                }
+                const u = act.payload orelse self.selected_text;
+                _ = nanoui.shell.openUrl(u);
                 self.dismiss();
             },
             .email => {
