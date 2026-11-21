@@ -21,6 +21,41 @@ export interface SystemPort {
   runShell(command: string): boolean;
 }
 
+export interface GrabPort {
+  frontmostPid(): number;
+  selfPid(): number;
+  axSelectedText(pid: number): string;
+  pressCopyMenu(pid: number): number;
+  pbChangeCount(): number;
+  pbSnapshot(): void;
+  pbRestore(): void;
+  readClipboard(): string;
+  sleepMs(ms: number): void;
+}
+
+const COPY_POLL_MS = 5;
+const COPY_POLL_TRIES = 25;
+
+export function grabSelectionWith(port: GrabPort): string {
+  const pid = port.frontmostPid();
+  if (pid < 0 || pid === port.selfPid()) return "";
+  const direct = port.axSelectedText(pid);
+  if (direct.length > 0) return direct;
+
+  const before = port.pbChangeCount();
+  if (port.pressCopyMenu(pid) !== 1) return "";
+  let copied = "";
+  for (let i = 0; i < COPY_POLL_TRIES; i++) {
+    port.sleepMs(COPY_POLL_MS);
+    if (port.pbChangeCount() !== before) {
+      copied = port.readClipboard();
+      break;
+    }
+  }
+  if (copied.length > 0) port.pbRestore();
+  return copied;
+}
+
 export function searchUrl(template: string, text: string): string {
   const query = urlEncode(text);
   return template.includes("{query}") ? template.split("{query}").join(query) : template + query;

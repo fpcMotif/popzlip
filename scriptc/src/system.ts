@@ -1,4 +1,4 @@
-import type { SystemPort } from "./executor.ts";
+import { type GrabPort, grabSelectionWith, type SystemPort } from "./executor.ts";
 import {
   pzAxSelectedText,
   pzFrontmostPid,
@@ -33,8 +33,6 @@ import type { GuidancePort, Schedule } from "./permission.ts";
 import type { Rect } from "./types.ts";
 
 const READ_CAPACITY = 1 << 20;
-const COPY_POLL_MS = 5;
-const COPY_POLL_TRIES = 15;
 
 let scratch = new Uint8Array(READ_CAPACITY);
 
@@ -65,27 +63,20 @@ export function accessibilitySelection(): string {
   return readInto((out) => pzAxSelectedText(pid, out));
 }
 
-export function grabSelection(): string {
-  const pid = pzFrontmostPid();
-  if (pid < 0 || pid === pzSelfPid()) return "";
-  const direct = readInto((out) => pzAxSelectedText(pid, out));
-  if (direct.length > 0) return direct;
+export const nativeGrabPort: GrabPort = {
+  frontmostPid: () => pzFrontmostPid(),
+  selfPid: () => pzSelfPid(),
+  axSelectedText: (pid: number) => readInto((out) => pzAxSelectedText(pid, out)),
+  pressCopyMenu: (pid: number) => pzPressCopyMenu(pid),
+  pbChangeCount: () => pzPbChangeCount(),
+  pbSnapshot: () => pzPbSnapshot(),
+  pbRestore: () => pzPbRestore(),
+  readClipboard,
+  sleepMs: (ms: number) => pzSleepMs(ms),
+};
 
-  pzPbSnapshot();
-  const before = pzPbChangeCount();
-  if (pzPressCopyMenu(pid) !== 1) return "";
-  let copied = "";
-  let changed = false;
-  for (let i = 0; i < COPY_POLL_TRIES; i++) {
-    pzSleepMs(COPY_POLL_MS);
-    if (pzPbChangeCount() !== before) {
-      changed = true;
-      copied = readClipboard();
-      break;
-    }
-  }
-  if (changed) pzPbRestore();
-  return copied;
+export function grabSelection(): string {
+  return grabSelectionWith(nativeGrabPort);
 }
 
 const guidanceTimers = new Map<number, () => void>();

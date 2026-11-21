@@ -2,6 +2,8 @@
 #import <Cocoa/Cocoa.h>
 #import <mach/mach.h>
 #import <stdint.h>
+#import <string.h>
+#import <sys/sysctl.h>
 #import <unistd.h>
 
 typedef void (*pz_event_cb)(int32_t kind, double x, double y, int32_t detail, void *ctx);
@@ -106,6 +108,28 @@ void pz_sleep_ms(double ms) {
     usleep((useconds_t)(ms * 1000.0));
 }
 
+static bool pz_is_screencapture_active(void) {
+    int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0};
+    size_t size = 0;
+    if (sysctl(mib, 4, NULL, &size, NULL, 0) < 0 || size == 0) return false;
+    struct kinfo_proc *procs = malloc(size);
+    if (!procs) return false;
+    bool active = false;
+    if (sysctl(mib, 4, procs, &size, NULL, 0) == 0) {
+        size_t count = size / sizeof(struct kinfo_proc);
+        for (size_t i = 0; i < count; i++) {
+            const char *name = procs[i].kp_proc.p_comm;
+            if (strcmp(name, "screencapture") == 0 || strcmp(name, "screencaptureui") == 0 ||
+                strcmp(name, "Screenshot") == 0) {
+                active = true;
+                break;
+            }
+        }
+    }
+    free(procs);
+    return active;
+}
+
 static CGEventRef pz_tap_callback(CGEventTapProxy proxy, CGEventType type, CGEventRef event, void *refcon) {
     (void)proxy;
     (void)refcon;
@@ -117,12 +141,14 @@ static CGEventRef pz_tap_callback(CGEventTapProxy proxy, CGEventType type, CGEve
     CGPoint pt = CGEventGetLocation(event);
     switch (type) {
         case kCGEventLeftMouseDown:
+            if (pz_is_screencapture_active()) return event;
             g_event_cb(PZ_MOUSE_DOWN, pt.x, pt.y, 0, g_event_ctx);
             break;
         case kCGEventLeftMouseDragged:
             g_event_cb(PZ_MOUSE_DRAGGED, pt.x, pt.y, 0, g_event_ctx);
             break;
         case kCGEventLeftMouseUp:
+            if (pz_is_screencapture_active()) return event;
             g_event_cb(PZ_MOUSE_UP, pt.x, pt.y,
                        (int32_t)CGEventGetIntegerValueField(event, kCGMouseEventClickState), g_event_ctx);
             break;
@@ -155,6 +181,7 @@ bool pz_monitor_start(pz_event_cb cb, void *ctx) {
 }
 
 int32_t pz_frontmost_pid(void) {
+    if (pz_is_screencapture_active()) return -1;
     NSRunningApplication *front = [[NSWorkspace sharedWorkspace] frontmostApplication];
     return front ? front.processIdentifier : -1;
 }
@@ -163,13 +190,56 @@ int32_t pz_self_pid(void) {
     return getpid();
 }
 
+static AXUIElementRef pz_ax_focused_element(AXUIElementRef app) {
+    AXUIElementRef focused = NULL;
+    if (AXUIElementCopyAttributeValue(app, kAXFocusedUIElementAttribute, (CFTypeRef *)&focused) == kAXErrorSuccess &&
+        focused) {
+        return focused;
+    }
+    AXUIElementSetAttributeValue(app, CFSTR("AXManualAccessibility"), kCFBooleanTrue);
+    if (AXUIElementCopyAttributeValue(app, kAXFocusedUIElementAttribute, (CFTypeRef *)&focused) == kAXErrorSuccess &&
+        focused) {
+        return focused;
+    }
+    return NULL;
+}
+
+static bool pz_ax_has_empty_or_non_text_focus(AXUIElementRef app) {
+    AXUIElementRef focused = pz_ax_focused_element(app);
+    if (!focused) return false;
+    bool skip = false;
+    CFTypeRef roleRef = NULL;
+    if (AXUIElementCopyAttributeValue(focused, kAXRoleAttribute, &roleRef) == kAXErrorSuccess && roleRef) {
+        if (CFGetTypeID(roleRef) == CFStringGetTypeID()) {
+            NSString *role = (__bridge NSString *)roleRef;
+            if ([role isEqualToString:@"AXOutline"] || [role isEqualToString:@"AXTable"] ||
+                [role isEqualToString:@"AXList"] || [role isEqualToString:@"AXImage"]) {
+                skip = true;
+            } else if ([role isEqualToString:@"AXTextArea"] || [role isEqualToString:@"AXTextField"] ||
+                       [role isEqualToString:@"AXComboBox"] || [role isEqualToString:@"AXSearchField"]) {
+                CFTypeRef selected = NULL;
+                if (AXUIElementCopyAttributeValue(focused, kAXSelectedTextAttribute, &selected) == kAXErrorSuccess &&
+                    selected) {
+                    if (CFGetTypeID(selected) == CFStringGetTypeID() &&
+                        [(__bridge NSString *)selected length] == 0) {
+                        skip = true;
+                    }
+                    CFRelease(selected);
+                }
+            }
+        }
+        CFRelease(roleRef);
+    }
+    CFRelease(focused);
+    return skip;
+}
+
 int32_t pz_ax_selected_text(int32_t pid, uint8_t *out, size_t cap) {
     @autoreleasepool {
         AXUIElementRef app = AXUIElementCreateApplication(pid);
-        AXUIElementRef focused = NULL;
+        AXUIElementRef focused = pz_ax_focused_element(app);
         int32_t result = 0;
-        if (AXUIElementCopyAttributeValue(app, kAXFocusedUIElementAttribute, (CFTypeRef *)&focused) == kAXErrorSuccess &&
-            focused) {
+        if (focused) {
             CFTypeRef selected = NULL;
             if (AXUIElementCopyAttributeValue(focused, kAXSelectedTextAttribute, &selected) == kAXErrorSuccess &&
                 selected) {
@@ -229,9 +299,16 @@ static AXUIElementRef pz_find_copy_item(AXUIElementRef app) {
     return found;
 }
 
+void pz_pb_snapshot(void);
+
 int32_t pz_press_copy_menu(int32_t pid) {
     @autoreleasepool {
+        if (pz_is_screencapture_active()) return 0;
         AXUIElementRef app = AXUIElementCreateApplication(pid);
+        if (pz_ax_has_empty_or_non_text_focus(app)) {
+            CFRelease(app);
+            return 0;
+        }
         AXUIElementRef item = pz_find_copy_item(app);
         CFRelease(app);
         if (!item) return -1;
@@ -239,7 +316,10 @@ int32_t pz_press_copy_menu(int32_t pid) {
         AXUIElementCopyAttributeValue(item, kAXEnabledAttribute, &enabled);
         BOOL on = enabled ? [(__bridge NSNumber *)enabled boolValue] : NO;
         if (enabled) CFRelease(enabled);
-        if (on) AXUIElementPerformAction(item, kAXPressAction);
+        if (on) {
+            pz_pb_snapshot();
+            AXUIElementPerformAction(item, kAXPressAction);
+        }
         CFRelease(item);
         return on ? 1 : 0;
     }
