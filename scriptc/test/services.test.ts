@@ -12,7 +12,7 @@ import {
   saveConfig,
   setConfigValue,
 } from "../src/config.ts";
-import { executeAction, searchUrl, type SystemPort } from "../src/executor.ts";
+import { executeAction, type GrabPort, grabSelectionWith, searchUrl, type SystemPort } from "../src/executor.ts";
 import { handleRequest, type McpHost } from "../src/mcp.ts";
 
 class FakeSystem implements SystemPort {
@@ -234,5 +234,69 @@ describe("MCP", () => {
     expect(replyText(call(h, "popclip_get_selection", {}))).toBe("selected text");
     expect(replyText(call(h, "popclip_get_stats", {}))).toContain("8.00 MB");
     expect((call(h, "nope", {})["error"] as { code: number }).code).toBe(-32602);
+  });
+});
+
+function makeGrabPort(overrides: Partial<GrabPort>): GrabPort {
+  return {
+    frontmostPid: () => 1327,
+    selfPid: () => 48286,
+    axSelectedText: () => "",
+    pressCopyMenu: () => 1,
+    pbChangeCount: () => 10,
+    pbSnapshot: () => undefined,
+    pbRestore: () => undefined,
+    readClipboard: () => "",
+    sleepMs: () => undefined,
+    ...overrides,
+  };
+}
+
+describe("grabSelectionWith", () => {
+  test("does not restore old text over a newly copied screenshot image when clipboard has no string", () => {
+    let state = { count: 151, kind: "text", restored: 0, polls: 0 };
+    const port = makeGrabPort({
+      pbChangeCount: () => state.count,
+      pbRestore: () => {
+        state = { ...state, restored: state.restored + 1, kind: "text" };
+      },
+      readClipboard: () => (state.kind === "text" ? "old text" : ""),
+      sleepMs: () => {
+        state = { ...state, polls: state.polls + 1 };
+        if (state.polls === 3) {
+          state = { ...state, count: 152, kind: "image" };
+        }
+      },
+    });
+    expect(grabSelectionWith(port)).toBe("");
+    expect(state.restored).toBe(0);
+    expect(state.kind).toBe("image");
+  });
+
+  test("does not snapshot the pasteboard when Copy menu is disabled or skipped", () => {
+    let snapshots = 0;
+    const port = makeGrabPort({ pressCopyMenu: () => 0, pbSnapshot: () => void snapshots++ });
+    expect(grabSelectionWith(port)).toBe("");
+    expect(snapshots).toBe(0);
+  });
+
+  test("restores an existing image clipboard even when the target app takes 110ms to finish Copy", () => {
+    let state = { count: 144, kind: "image", text: "", restored: 0, elapsedMs: 0 };
+    const port = makeGrabPort({
+      pbChangeCount: () => state.count,
+      pbRestore: () => {
+        state = { ...state, restored: state.restored + 1, kind: "image" };
+      },
+      readClipboard: () => state.text,
+      sleepMs: (ms: number) => {
+        state.elapsedMs += ms;
+        if (state.elapsedMs >= 110 && state.count === 144) {
+          state = { ...state, count: 145, kind: "text", text: "selected web text" };
+        }
+      },
+    });
+    expect(grabSelectionWith(port)).toBe("selected web text");
+    expect(state.restored).toBe(1);
+    expect(state.kind).toBe("image");
   });
 });

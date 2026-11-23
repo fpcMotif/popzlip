@@ -1,0 +1,31 @@
+amends "package://github.com/jdx/hk/releases/download/v2.5.0/hk@2.5.0#/Config.pkl"
+
+steps {
+  ["scriptc-fmt"] {
+    glob = "scriptc/**/*.{ts,tsx,js,jsx,json,md}"
+    check = "cd scriptc && bun fmt --check"
+    fix = "cd scriptc && bun fmt"
+  }
+  ["scriptc-lint"] {
+    glob = "scriptc/**/*.{ts,tsx,js,jsx}"
+    check = "cd scriptc && bun lint"
+    fix = "cd scriptc && bun lint --fix"
+  }
+  ["scriptc-typecheck"] {
+    glob = "scriptc/**/*.{ts,tsx}"
+    check = "cd scriptc && bun check"
+  }
+  ["scriptc-test"] {
+    glob = "scriptc/**/*.{ts,tsx,m,h}"
+    check = "cd scriptc && bun test test"
+  }
+}
+
+hooks {
+  ["pre-commit"] {
+    fix = true
+    stage = false
+    stash = "none"
+    steps = steps
+  }
+}
